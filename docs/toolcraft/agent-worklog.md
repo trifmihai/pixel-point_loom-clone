@@ -27,6 +27,22 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Skipped checks: Gumlet API tests skipped because MVP intentionally uses iframe embeds only and no Gumlet API key.
 - Risks: Feedback and admin data are local to the browser unless a backend is added; iframe playback-rate setting is best effort because the standard iframe does not expose a guaranteed typed API in this app.
 
+### Iteration 2 - Toolcraft UI component refactor
+
+- Request: Refactor the portal screens to use almost entirely shadcn-style Toolcraft components instead of hand-rolled buttons, inputs, textareas, selects, cards, and badges.
+- Task type: Post-first-working product presentation and component-system refactor.
+- User-visible result: Admin and share portal screens now compose the existing Toolcraft UI layer for cards, buttons, fields, labels, inputs, textarea, badges, separators, empty states, and the playback-speed select.
+- Source/reference checked: User correction, `AGENTS.md`, `docs/toolcraft/workflow.md`, exported Toolcraft UI primitive/composite APIs, existing browser failure output.
+- Docs/contracts read: `AGENTS.md`, `docs/toolcraft/workflow.md`, local `writing-plans` skill, `superpowers:test-driven-development`, `superpowers:systematic-debugging`.
+- Contract rules applied: Use existing component system before custom code, keep route/store/Gumlet behavior unchanged, preserve accessible browser-observable behavior, update worklog before completion.
+- Decision: Replace available raw form/control primitives with Toolcraft UI components and add a static guard test that prevents regressing to raw `button`, `input`, `textarea`, `select`, or `option` usage in portal screens.
+- Alternatives rejected: Keeping native controls with CSS classes because the project already ships Toolcraft UI primitives; changing product behavior while refactoring because the requested correction was component usage.
+- State/output mapping: Project/video/share/feedback state remains in the same local React and localStorage paths; only presentation composition changed.
+- Files changed: `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, `src/app/portal-component-system.test.ts`, `e2e/app-controls.spec.ts`, `e2e/app-browser-acceptance.spec.ts`, `docs/toolcraft/agent-worklog.md`.
+- Verification: Red test first failed for missing shared UI imports and raw controls; after refactor `npm.cmd run typecheck`, `npm.cmd run test`, and focused Playwright browser acceptance passed.
+- Skipped checks: Full performance suite skipped because this Tier 2 pass does not change renderer workload, Gumlet iframe behavior, routing, storage, or export paths.
+- Risks: The portal still uses ordinary layout tags where no Toolcraft component is appropriate; this is intentional and keeps semantic page structure straightforward.
+
 ## Decisions
 
 ### Renderer
@@ -49,9 +65,9 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 
 ### Controls
 
-- Decision: Use standard accessible React form controls for project/video metadata.
-- Reason: Dynamic project/video CRUD is application data management, not a fixed Toolcraft control schema.
-- Evidence: Admin labels and browser tests for project creation, video addition, share URL creation, and metadata display.
+- Decision: Use Toolcraft UI/shadcn-style primitives for visible portal controls and form chrome.
+- Reason: The generated app includes a shared component system and the portal should not hand-roll available controls.
+- Evidence: `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, and `src/app/portal-component-system.test.ts`.
 
 ### Export
 
@@ -80,6 +96,10 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Run: `npm.cmd run verify:final` passed AI check, unit/docs/integrity tests, and build, then was stopped because `playwright install chromium` hung without output.
 - Run: `npm.cmd exec -- playwright test --grep-invert "browser perf:" --reporter=list` passed, 2 browser tests.
 - Run: `npm.cmd exec -- playwright test --grep "browser perf:" --workers=1 --reporter=list` passed, 1 browser performance fallback test.
+- Run: `npm.cmd exec -- vitest run src/app/portal-component-system.test.ts` first failed for raw form primitives, then passed after the Toolcraft UI refactor.
+- Run: `npm.cmd run typecheck` passed after refactor.
+- Run: `npm.cmd run test` passed after refactor.
+- Run: `npm.cmd exec -- playwright test e2e/app-controls.spec.ts e2e/app-browser-acceptance.spec.ts --reporter=list` passed after refactor.
 
 ## Risks
 

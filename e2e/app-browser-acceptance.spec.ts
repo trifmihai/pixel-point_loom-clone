@@ -47,7 +47,7 @@ test("browser: share page opens an encoded project and records timestamped feedb
 
   await expect(page.getByRole("heading", { name: "Client review" })).toBeVisible();
   await expect(
-    page.getByText("12:00 video · Suggested 1.5x · Watch in about 8:00").first(),
+    page.getByText("12:00 video - Suggested 1.5x - Watch in about 8:00").first(),
   ).toBeVisible();
   await expect(page.locator('iframe[title="Homepage walkthrough Gumlet video"]')).toHaveAttribute(
     "src",

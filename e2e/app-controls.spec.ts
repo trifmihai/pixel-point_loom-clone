@@ -20,11 +20,12 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   await page.getByLabel("Video description").fill("Review the homepage hero changes.");
   await page.getByLabel("Duration in seconds").fill("720");
   await page.getByLabel("Start time in seconds").fill("30");
-  await page.getByLabel("Recommended speed").selectOption("1.5");
+  await page.getByLabel("Recommended speed").click();
+  await page.getByRole("option", { name: "1.5x" }).click();
   await page.getByRole("button", { name: "Add video" }).click();
 
   await expect(page.getByRole("heading", { name: "Hero review" })).toBeVisible();
-  await expect(page.getByText("12:00 video · Suggested 1.5x").first()).toBeVisible();
+  await expect(page.getByText("12:00 video - Suggested 1.5x").first()).toBeVisible();
   await expect(page.locator('iframe[title="Hero review Gumlet video"]')).toHaveAttribute(
     "src",
     /https:\/\/play\.gumlet\.io\/embed\/gumlet-asset-123\?t=30/,

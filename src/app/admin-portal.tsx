@@ -9,6 +9,35 @@ import {
   Trash2,
 } from "lucide-react";
 
+import {
+  Badge,
+  Button,
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+  Field,
+  FieldGroup,
+  FieldLabel,
+  Input,
+  Separator,
+  Textarea,
+} from "@/toolcraft/ui";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/toolcraft/ui/components/primitives";
+
 import { GumletPlayer } from "./gumlet-player";
 import {
   addProject,
@@ -47,6 +76,12 @@ type VideoDraft = {
   title: string;
 };
 
+type SpeedSelectProps = {
+  ariaLabel: string;
+  onValueChange: (value: PlaybackSpeed) => void;
+  value: PlaybackSpeed;
+};
+
 const emptyProjectDraft: ProjectDraft = {
   clientName: "",
   description: "",
@@ -62,6 +97,11 @@ const emptyVideoDraft: VideoDraft = {
   thumbnailUrl: "",
   title: "",
 };
+
+const playbackSpeedItems = playbackSpeedOptions.map((speed) => ({
+  label: `${speed}x`,
+  value: String(speed),
+}));
 
 function parseOptionalSeconds(value: string): number | undefined {
   const parsed = Number(value);
@@ -87,9 +127,9 @@ function getVideoMeta(video: PortalVideo): string {
     return `Suggested ${video.recommendedPlaybackSpeed}x`;
   }
 
-  return `${formatDuration(video.durationSeconds)} video · Suggested ${
+  return `${formatDuration(video.durationSeconds)} video - Suggested ${
     video.recommendedPlaybackSpeed
-  }x · Watch in about ${formatDuration(watchTime)} · Saves about ${formatDuration(savedTime)}`;
+  }x - Watch in about ${formatDuration(watchTime)} - Saves about ${formatDuration(savedTime)}`;
 }
 
 function formatDate(value: string): string {
@@ -105,6 +145,31 @@ function loadInitialData(): PortalData {
   }
 
   return loadPortalData();
+}
+
+function SpeedSelect({ ariaLabel, onValueChange, value }: SpeedSelectProps): React.JSX.Element {
+  const selected = playbackSpeedItems.find((item) => item.value === String(value));
+
+  return (
+    <Select
+      items={playbackSpeedItems}
+      onValueChange={(nextValue) => onValueChange(Number(nextValue) as PlaybackSpeed)}
+      value={String(value)}
+    >
+      <SelectTrigger aria-label={ariaLabel} className="w-full justify-between" size="lg">
+        <SelectValue>{() => selected?.label ?? `${value}x`}</SelectValue>
+      </SelectTrigger>
+      <SelectContent align="start" alignItemWithTrigger={false}>
+        <SelectGroup>
+          {playbackSpeedItems.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
 }
 
 export function AdminPortal(): React.JSX.Element {
@@ -191,65 +256,74 @@ export function AdminPortal(): React.JSX.Element {
   }
 
   return (
-    <main className="min-h-dvh bg-[#101214] text-neutral-50">
+    <main className="min-h-dvh bg-[color:var(--background)] text-[color:var(--foreground)]">
       <div className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-5 px-4 py-4 lg:grid lg:grid-cols-[360px_minmax(0,1fr)] lg:px-6">
-        <aside className="rounded-lg border border-white/10 bg-[#171a1d] p-4">
-          <div className="mb-4">
-            <p className="text-xs font-medium uppercase tracking-normal text-sky-300">Gumlet portal</p>
-            <h1 className="mt-1 text-2xl font-semibold">Client video reviews</h1>
-            <p className="mt-2 text-sm leading-6 text-neutral-400">
+        <Card className="h-fit bg-[color:color-mix(in_oklab,var(--card)_92%,black)]">
+          <CardHeader>
+            <Badge className="w-fit" variant="emphasisOutline">
+              Gumlet portal
+            </Badge>
+            <CardTitle aria-level={1} className="mt-1 text-2xl font-semibold" role="heading">
+              Client video reviews
+            </CardTitle>
+            <CardDescription className="text-sm leading-6">
               Organize existing Gumlet videos, set suggested speed, and send unlisted review links.
-            </p>
-          </div>
+            </CardDescription>
+          </CardHeader>
 
-          <form className="space-y-3 border-t border-white/10 pt-4" onSubmit={handleCreateProject}>
-            <label className="block text-sm font-medium text-neutral-200">
-              Project name
-              <input
-                className="mt-1 w-full rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                onChange={(event) =>
-                  setProjectDraft((draft) => ({ ...draft, name: event.target.value }))
-                }
-                required
-                value={projectDraft.name}
-              />
-            </label>
-            <label className="block text-sm font-medium text-neutral-200">
-              Client name
-              <input
-                className="mt-1 w-full rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                onChange={(event) =>
-                  setProjectDraft((draft) => ({ ...draft, clientName: event.target.value }))
-                }
-                value={projectDraft.clientName}
-              />
-            </label>
-            <label className="block text-sm font-medium text-neutral-200">
-              Project description
-              <textarea
-                className="mt-1 min-h-20 w-full rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                onChange={(event) =>
-                  setProjectDraft((draft) => ({ ...draft, description: event.target.value }))
-                }
-                value={projectDraft.description}
-              />
-            </label>
-            <button
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-sky-500 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-400"
-              type="submit"
-            >
-              <Plus size={16} />
-              Create project
-            </button>
-          </form>
+          <CardContent>
+            <form className="space-y-4" onSubmit={handleCreateProject}>
+              <Separator />
+              <FieldGroup className="gap-3">
+                <Field>
+                  <FieldLabel htmlFor="project-name">Project name</FieldLabel>
+                  <Input
+                    id="project-name"
+                    onChange={(event) =>
+                      setProjectDraft((draft) => ({ ...draft, name: event.target.value }))
+                    }
+                    required
+                    size="lg"
+                    value={projectDraft.name}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="project-client-name">Client name</FieldLabel>
+                  <Input
+                    id="project-client-name"
+                    onChange={(event) =>
+                      setProjectDraft((draft) => ({ ...draft, clientName: event.target.value }))
+                    }
+                    size="lg"
+                    value={projectDraft.clientName}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="project-description">Project description</FieldLabel>
+                  <Textarea
+                    id="project-description"
+                    onChange={(event) =>
+                      setProjectDraft((draft) => ({ ...draft, description: event.target.value }))
+                    }
+                    size="lg"
+                    value={projectDraft.description}
+                  />
+                </Field>
+              </FieldGroup>
+              <Button className="w-full" size="xl" type="submit">
+                <Plus />
+                Create project
+              </Button>
+            </form>
+          </CardContent>
 
-          <div className="mt-5 space-y-2">
+          <CardContent className="space-y-2">
             {data.projects.map((project) => (
-              <button
-                className={`w-full rounded-lg border p-3 text-left transition ${
+              <Button
+                className={`!h-auto w-full justify-start whitespace-normal px-3 py-3 text-left ${
                   selectedProject?.id === project.id
-                    ? "border-sky-400/60 bg-sky-400/10"
-                    : "border-white/10 bg-[#111315] hover:border-white/20"
+                    ? "border-sky-400/60 bg-sky-400/10 text-white"
+                    : "text-white"
                 }`}
                 key={project.id}
                 onClick={() => {
@@ -258,356 +332,435 @@ export function AdminPortal(): React.JSX.Element {
                   setShareStatus("");
                 }}
                 type="button"
+                variant="outline"
               >
-                <span className="block font-medium text-white">{project.name}</span>
-                <span className="mt-1 block text-xs text-neutral-400">
-                  {project.clientName ? `${project.clientName} · ` : ""}
-                  {project.videos.length} videos · Updated {formatDate(project.updatedAt)}
+                <span className="flex min-w-0 flex-col items-start gap-1">
+                  <span className="truncate text-sm font-medium">{project.name}</span>
+                  <span className="text-xs text-[color:var(--muted-foreground)]">
+                    {project.clientName ? `${project.clientName} - ` : ""}
+                    {project.videos.length} videos - Updated {formatDate(project.updatedAt)}
+                  </span>
                 </span>
-              </button>
+              </Button>
             ))}
-          </div>
-        </aside>
+          </CardContent>
+        </Card>
 
-        <section className="min-w-0 rounded-lg border border-white/10 bg-[#151719] p-4 lg:p-5">
+        <Card className="min-w-0 bg-[color:color-mix(in_oklab,var(--card)_88%,black)]">
           {selectedProject ? (
-            <div className="space-y-5">
-              <div className="flex flex-col gap-3 border-b border-white/10 pb-4 xl:flex-row xl:items-start xl:justify-between">
-                <div className="min-w-0">
-                  <h2 className="text-3xl font-semibold text-white">{selectedProject.name}</h2>
-                  <input
-                    aria-label="Selected project name"
-                    className="mt-3 w-full rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                    onChange={(event) => updateSelectedProject({ name: event.target.value })}
-                    value={selectedProject.name}
-                  />
-                  <div className="mt-2 grid gap-2 md:grid-cols-2">
-                    <input
-                      aria-label="Selected client name"
-                      className="rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                      onChange={(event) =>
-                        updateSelectedProject({ clientName: event.target.value })
-                      }
-                      placeholder="Client name"
-                      value={selectedProject.clientName ?? ""}
-                    />
-                    <input
-                      aria-label="Share URL"
-                      className="rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-neutral-300 outline-none"
-                      readOnly
-                      value={shareUrl}
-                    />
-                  </div>
-                  <textarea
-                    aria-label="Selected project description"
-                    className="mt-2 min-h-16 w-full rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                    onChange={(event) =>
-                      updateSelectedProject({ description: event.target.value })
-                    }
-                    placeholder="Project description"
-                    value={selectedProject.description ?? ""}
-                  />
+            <>
+              <CardHeader className="gap-4 xl:grid-cols-[1fr_auto]">
+                <div className="min-w-0 space-y-3">
+                  <CardTitle
+                    aria-level={1}
+                    className="text-3xl font-semibold text-white"
+                    role="heading"
+                  >
+                    {selectedProject.name}
+                  </CardTitle>
+                  <FieldGroup className="grid gap-2 md:grid-cols-2">
+                    <Field className="md:col-span-2">
+                      <FieldLabel htmlFor="selected-project-name">Project name</FieldLabel>
+                      <Input
+                        aria-label="Selected project name"
+                        id="selected-project-name"
+                        onChange={(event) => updateSelectedProject({ name: event.target.value })}
+                        size="lg"
+                        value={selectedProject.name}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="selected-client-name">Client name</FieldLabel>
+                      <Input
+                        aria-label="Selected client name"
+                        id="selected-client-name"
+                        onChange={(event) =>
+                          updateSelectedProject({ clientName: event.target.value })
+                        }
+                        placeholder="Client name"
+                        size="lg"
+                        value={selectedProject.clientName ?? ""}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="share-url">Share URL</FieldLabel>
+                      <Input
+                        aria-label="Share URL"
+                        id="share-url"
+                        readOnly
+                        size="lg"
+                        value={shareUrl}
+                      />
+                    </Field>
+                    <Field className="md:col-span-2">
+                      <FieldLabel htmlFor="selected-project-description">
+                        Project description
+                      </FieldLabel>
+                      <Textarea
+                        aria-label="Selected project description"
+                        id="selected-project-description"
+                        onChange={(event) =>
+                          updateSelectedProject({ description: event.target.value })
+                        }
+                        placeholder="Project description"
+                        size="lg"
+                        value={selectedProject.description ?? ""}
+                      />
+                    </Field>
+                  </FieldGroup>
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  <button
-                    className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-white hover:bg-white/10"
+
+                <CardAction className="static col-auto row-auto flex flex-wrap gap-2 justify-self-start xl:justify-self-end">
+                  <Button
                     onClick={() => void handleCopyShareLink(selectedProject)}
+                    size="lg"
                     type="button"
+                    variant="outline"
                   >
-                    <Copy size={16} />
+                    <Copy />
                     Copy client link
-                  </button>
-                  <a
-                    className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-white hover:bg-white/10"
-                    href={shareUrl || createShareUrl(selectedProject, window.location.origin)}
-                    rel="noreferrer"
-                    target="_blank"
+                  </Button>
+                  <Button
+                    nativeButton={false}
+                    render={
+                      <a
+                        href={shareUrl || createShareUrl(selectedProject, window.location.origin)}
+                        rel="noreferrer"
+                        target="_blank"
+                      />
+                    }
+                    size="lg"
+                    variant="outline"
                   >
-                    <ExternalLink size={16} />
+                    <ExternalLink />
                     Open
-                  </a>
-                  <button
-                    className="inline-flex items-center gap-2 rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-100 hover:bg-red-500/20"
+                  </Button>
+                  <Button
                     onClick={() => {
                       setData((current) => deleteProject(current, selectedProject.id));
                       setSelectedProjectId(null);
                     }}
+                    size="lg"
                     type="button"
+                    variant="destructive"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 />
                     Delete
-                  </button>
-                </div>
-              </div>
+                  </Button>
+                </CardAction>
+              </CardHeader>
 
-              {shareStatus ? (
-                <div className="inline-flex items-center gap-2 rounded-md border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
-                  <CheckCircle2 size={16} />
-                  {shareStatus}
-                </div>
-              ) : null}
+              <CardContent className="space-y-5">
+                <Separator />
 
-              <form
-                className="grid gap-3 rounded-lg border border-white/10 bg-[#101214] p-4 md:grid-cols-2 xl:grid-cols-4"
-                onSubmit={handleAddVideo}
-              >
-                <label className="block text-sm font-medium text-neutral-200">
-                  Gumlet asset ID
-                  <input
-                    className="mt-1 w-full rounded-md border border-white/10 bg-[#090a0b] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                    onChange={(event) =>
-                      setVideoDraft((draft) => ({ ...draft, assetId: event.target.value }))
-                    }
-                    required
-                    value={videoDraft.assetId}
-                  />
-                </label>
-                <label className="block text-sm font-medium text-neutral-200">
-                  Video title
-                  <input
-                    className="mt-1 w-full rounded-md border border-white/10 bg-[#090a0b] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                    onChange={(event) =>
-                      setVideoDraft((draft) => ({ ...draft, title: event.target.value }))
-                    }
-                    required
-                    value={videoDraft.title}
-                  />
-                </label>
-                <label className="block text-sm font-medium text-neutral-200 xl:col-span-2">
-                  Video description
-                  <input
-                    className="mt-1 w-full rounded-md border border-white/10 bg-[#090a0b] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                    onChange={(event) =>
-                      setVideoDraft((draft) => ({ ...draft, description: event.target.value }))
-                    }
-                    value={videoDraft.description}
-                  />
-                </label>
-                <label className="block text-sm font-medium text-neutral-200">
-                  Thumbnail URL
-                  <input
-                    className="mt-1 w-full rounded-md border border-white/10 bg-[#090a0b] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                    onChange={(event) =>
-                      setVideoDraft((draft) => ({ ...draft, thumbnailUrl: event.target.value }))
-                    }
-                    value={videoDraft.thumbnailUrl}
-                  />
-                </label>
-                <label className="block text-sm font-medium text-neutral-200">
-                  Duration in seconds
-                  <input
-                    className="mt-1 w-full rounded-md border border-white/10 bg-[#090a0b] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                    inputMode="numeric"
-                    onChange={(event) =>
-                      setVideoDraft((draft) => ({ ...draft, durationSeconds: event.target.value }))
-                    }
-                    value={videoDraft.durationSeconds}
-                  />
-                </label>
-                <label className="block text-sm font-medium text-neutral-200">
-                  Start time in seconds
-                  <input
-                    className="mt-1 w-full rounded-md border border-white/10 bg-[#090a0b] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                    inputMode="numeric"
-                    onChange={(event) =>
-                      setVideoDraft((draft) => ({ ...draft, startTimeSeconds: event.target.value }))
-                    }
-                    value={videoDraft.startTimeSeconds}
-                  />
-                </label>
-                <label className="block text-sm font-medium text-neutral-200">
-                  Recommended speed
-                  <select
-                    className="mt-1 w-full rounded-md border border-white/10 bg-[#090a0b] px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-                    onChange={(event) =>
-                      setVideoDraft((draft) => ({
-                        ...draft,
-                        recommendedPlaybackSpeed: Number(event.target.value) as PlaybackSpeed,
-                      }))
-                    }
-                    value={videoDraft.recommendedPlaybackSpeed}
-                  >
-                    {playbackSpeedOptions.map((speed) => (
-                      <option key={speed} value={speed}>
-                        {speed}x
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-400 md:self-end"
-                  type="submit"
-                >
-                  <Plus size={16} />
-                  Add video
-                </button>
-              </form>
+                {shareStatus ? (
+                  <Badge className="gap-2 px-3 py-2 text-sm" variant="secondary">
+                    <CheckCircle2 className="size-4" />
+                    {shareStatus}
+                  </Badge>
+                ) : null}
 
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-                <div className="min-w-0">
-                  {activeVideo ? (
-                    <div className="space-y-3">
-                      <GumletPlayer video={activeVideo} />
-                      <div>
-                        <h2 className="text-2xl font-semibold">{activeVideo.title}</h2>
-                        <p className="mt-1 text-sm text-neutral-300">{getVideoMeta(activeVideo)}</p>
-                        <p className="mt-2 text-sm leading-6 text-neutral-400">
-                          {activeVideo.description || "No description added."}
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border border-dashed border-white/15 bg-[#101214] p-8 text-center text-neutral-400">
-                      Add a Gumlet video to preview it here.
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3">
-                  {videos.map((video, index) => (
-                    <article
-                      className={`rounded-lg border p-3 ${
-                        activeVideo?.id === video.id
-                          ? "border-sky-400/60 bg-sky-400/10"
-                          : "border-white/10 bg-[#101214]"
-                      }`}
-                      key={video.id}
+                <Card className="bg-[color:color-mix(in_oklab,var(--background)_82%,var(--card))]">
+                  <CardHeader>
+                    <CardTitle>Add Gumlet video</CardTitle>
+                    <CardDescription>
+                      Paste an existing Gumlet asset ID and metadata for the client playlist.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <form
+                      className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
+                      onSubmit={handleAddVideo}
                     >
-                      <button
-                        className="block w-full text-left"
-                        onClick={() => setActiveVideoId(video.id)}
-                        type="button"
+                      <Field>
+                        <FieldLabel htmlFor="gumlet-asset-id">Gumlet asset ID</FieldLabel>
+                        <Input
+                          id="gumlet-asset-id"
+                          onChange={(event) =>
+                            setVideoDraft((draft) => ({ ...draft, assetId: event.target.value }))
+                          }
+                          required
+                          size="lg"
+                          value={videoDraft.assetId}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="video-title">Video title</FieldLabel>
+                        <Input
+                          id="video-title"
+                          onChange={(event) =>
+                            setVideoDraft((draft) => ({ ...draft, title: event.target.value }))
+                          }
+                          required
+                          size="lg"
+                          value={videoDraft.title}
+                        />
+                      </Field>
+                      <Field className="xl:col-span-2">
+                        <FieldLabel htmlFor="video-description">Video description</FieldLabel>
+                        <Input
+                          id="video-description"
+                          onChange={(event) =>
+                            setVideoDraft((draft) => ({
+                              ...draft,
+                              description: event.target.value,
+                            }))
+                          }
+                          size="lg"
+                          value={videoDraft.description}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="thumbnail-url">Thumbnail URL</FieldLabel>
+                        <Input
+                          id="thumbnail-url"
+                          onChange={(event) =>
+                            setVideoDraft((draft) => ({
+                              ...draft,
+                              thumbnailUrl: event.target.value,
+                            }))
+                          }
+                          size="lg"
+                          value={videoDraft.thumbnailUrl}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="duration-seconds">Duration in seconds</FieldLabel>
+                        <Input
+                          id="duration-seconds"
+                          inputMode="numeric"
+                          onChange={(event) =>
+                            setVideoDraft((draft) => ({
+                              ...draft,
+                              durationSeconds: event.target.value,
+                            }))
+                          }
+                          size="lg"
+                          value={videoDraft.durationSeconds}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="start-time-seconds">Start time in seconds</FieldLabel>
+                        <Input
+                          id="start-time-seconds"
+                          inputMode="numeric"
+                          onChange={(event) =>
+                            setVideoDraft((draft) => ({
+                              ...draft,
+                              startTimeSeconds: event.target.value,
+                            }))
+                          }
+                          size="lg"
+                          value={videoDraft.startTimeSeconds}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel>Recommended speed</FieldLabel>
+                        <SpeedSelect
+                          ariaLabel="Recommended speed"
+                          onValueChange={(recommendedPlaybackSpeed) =>
+                            setVideoDraft((draft) => ({
+                              ...draft,
+                              recommendedPlaybackSpeed,
+                            }))
+                          }
+                          value={videoDraft.recommendedPlaybackSpeed}
+                        />
+                      </Field>
+                      <Button className="md:self-end" size="xl" type="submit">
+                        <Plus />
+                        Add video
+                      </Button>
+                    </form>
+                  </CardContent>
+                </Card>
+
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                  <div className="min-w-0">
+                    {activeVideo ? (
+                      <div className="space-y-3">
+                        <GumletPlayer video={activeVideo} />
+                        <Card className="bg-[color:color-mix(in_oklab,var(--card)_92%,black)]">
+                          <CardHeader>
+                          <CardTitle aria-level={2} className="text-2xl" role="heading">
+                            {activeVideo.title}
+                          </CardTitle>
+                            <CardDescription className="text-sm">
+                              {getVideoMeta(activeVideo)}
+                            </CardDescription>
+                          </CardHeader>
+                          <CardContent className="text-sm leading-6 text-[color:var(--muted-foreground)]">
+                            {activeVideo.description || "No description added."}
+                          </CardContent>
+                        </Card>
+                      </div>
+                    ) : (
+                      <Empty className="min-h-[260px]" variant="outline">
+                        <EmptyHeader>
+                          <EmptyTitle>Add a Gumlet video</EmptyTitle>
+                          <EmptyDescription>
+                            Add a Gumlet video to preview it here.
+                          </EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    {videos.map((video, index) => (
+                      <Card
+                        className={
+                          activeVideo?.id === video.id
+                            ? "border border-sky-400/60 bg-sky-400/10"
+                            : "bg-[color:color-mix(in_oklab,var(--background)_82%,var(--card))]"
+                        }
+                        key={video.id}
+                        size="sm"
                       >
-                        <span className="block font-semibold text-white">{video.title}</span>
-                        <p className="mt-1 text-xs text-neutral-400">{getVideoMeta(video)}</p>
-                      </button>
-                      <div className="mt-3 grid gap-2">
-                        <input
-                          aria-label={`${video.title} title`}
-                          className="rounded-md border border-white/10 bg-[#090a0b] px-2 py-1.5 text-sm text-white"
-                          onChange={(event) =>
-                            setData((current) =>
-                              updateVideo(current, selectedProject.id, video.id, {
-                                title: event.target.value,
-                              }),
-                            )
-                          }
-                          value={video.title}
-                        />
-                        <input
-                          aria-label={`${video.title} asset ID`}
-                          className="rounded-md border border-white/10 bg-[#090a0b] px-2 py-1.5 text-sm text-white"
-                          onChange={(event) =>
-                            setData((current) =>
-                              updateVideo(current, selectedProject.id, video.id, {
-                                assetId: event.target.value,
-                              }),
-                            )
-                          }
-                          value={video.assetId}
-                        />
-                        <div className="grid grid-cols-3 gap-2">
-                          <input
-                            aria-label={`${video.title} duration`}
-                            className="rounded-md border border-white/10 bg-[#090a0b] px-2 py-1.5 text-sm text-white"
-                            inputMode="numeric"
-                            onChange={(event) =>
-                              setData((current) =>
-                                updateVideo(current, selectedProject.id, video.id, {
-                                  durationSeconds: parseOptionalSeconds(event.target.value),
-                                }),
-                              )
-                            }
-                            value={video.durationSeconds ?? ""}
-                          />
-                          <input
-                            aria-label={`${video.title} start time`}
-                            className="rounded-md border border-white/10 bg-[#090a0b] px-2 py-1.5 text-sm text-white"
-                            inputMode="numeric"
-                            onChange={(event) =>
-                              setData((current) =>
-                                updateVideo(current, selectedProject.id, video.id, {
-                                  startTimeSeconds: parseOptionalSeconds(event.target.value),
-                                }),
-                              )
-                            }
-                            value={video.startTimeSeconds ?? ""}
-                          />
-                          <select
-                            aria-label={`${video.title} speed`}
-                            className="rounded-md border border-white/10 bg-[#090a0b] px-2 py-1.5 text-sm text-white"
-                            onChange={(event) =>
-                              setData((current) =>
-                                updateVideo(current, selectedProject.id, video.id, {
-                                  recommendedPlaybackSpeed: Number(
-                                    event.target.value,
-                                  ) as PlaybackSpeed,
-                                }),
-                              )
-                            }
-                            value={video.recommendedPlaybackSpeed}
+                        <CardHeader>
+                          <Button
+                            className="!h-auto w-full justify-start whitespace-normal px-0 py-0 text-left"
+                            onClick={() => setActiveVideoId(video.id)}
+                            type="button"
+                            variant="ghost-static"
                           >
-                            {playbackSpeedOptions.map((speed) => (
-                              <option key={speed} value={speed}>
-                                {speed}x
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          aria-label={`Move ${video.title} up`}
-                          className="rounded-md border border-white/10 p-2 text-neutral-200 hover:bg-white/10 disabled:opacity-40"
-                          disabled={index === 0}
-                          onClick={() =>
-                            setData((current) => moveVideo(current, selectedProject.id, video.id, "up"))
-                          }
-                          type="button"
-                        >
-                          <ArrowUp size={15} />
-                        </button>
-                        <button
-                          aria-label={`Move ${video.title} down`}
-                          className="rounded-md border border-white/10 p-2 text-neutral-200 hover:bg-white/10 disabled:opacity-40"
-                          disabled={index === videos.length - 1}
-                          onClick={() =>
-                            setData((current) =>
-                              moveVideo(current, selectedProject.id, video.id, "down"),
-                            )
-                          }
-                          type="button"
-                        >
-                          <ArrowDown size={15} />
-                        </button>
-                        <button
-                          className="ml-auto inline-flex items-center gap-2 rounded-md border border-red-400/30 px-2 py-1.5 text-sm text-red-100 hover:bg-red-500/20"
-                          onClick={() =>
-                            setData((current) => removeVideo(current, selectedProject.id, video.id))
-                          }
-                          type="button"
-                        >
-                          <Trash2 size={15} />
-                          Remove
-                        </button>
-                      </div>
-                    </article>
-                  ))}
+                            <span className="flex min-w-0 flex-col items-start gap-1">
+                              <span className="font-semibold text-white">{video.title}</span>
+                              <span className="text-xs text-[color:var(--muted-foreground)]">
+                                {getVideoMeta(video)}
+                              </span>
+                            </span>
+                          </Button>
+                        </CardHeader>
+                        <CardContent className="grid gap-2">
+                          <Input
+                            aria-label={`${video.title} title`}
+                            onChange={(event) =>
+                              setData((current) =>
+                                updateVideo(current, selectedProject.id, video.id, {
+                                  title: event.target.value,
+                                }),
+                              )
+                            }
+                            size="lg"
+                            value={video.title}
+                          />
+                          <Input
+                            aria-label={`${video.title} asset ID`}
+                            onChange={(event) =>
+                              setData((current) =>
+                                updateVideo(current, selectedProject.id, video.id, {
+                                  assetId: event.target.value,
+                                }),
+                              )
+                            }
+                            size="lg"
+                            value={video.assetId}
+                          />
+                          <div className="grid grid-cols-3 gap-2">
+                            <Input
+                              aria-label={`${video.title} duration`}
+                              inputMode="numeric"
+                              onChange={(event) =>
+                                setData((current) =>
+                                  updateVideo(current, selectedProject.id, video.id, {
+                                    durationSeconds: parseOptionalSeconds(event.target.value),
+                                  }),
+                                )
+                              }
+                              size="lg"
+                              value={video.durationSeconds ?? ""}
+                            />
+                            <Input
+                              aria-label={`${video.title} start time`}
+                              inputMode="numeric"
+                              onChange={(event) =>
+                                setData((current) =>
+                                  updateVideo(current, selectedProject.id, video.id, {
+                                    startTimeSeconds: parseOptionalSeconds(event.target.value),
+                                  }),
+                                )
+                              }
+                              size="lg"
+                              value={video.startTimeSeconds ?? ""}
+                            />
+                            <SpeedSelect
+                              ariaLabel={`${video.title} speed`}
+                              onValueChange={(recommendedPlaybackSpeed) =>
+                                setData((current) =>
+                                  updateVideo(current, selectedProject.id, video.id, {
+                                    recommendedPlaybackSpeed,
+                                  }),
+                                )
+                              }
+                              value={video.recommendedPlaybackSpeed}
+                            />
+                          </div>
+                        </CardContent>
+                        <CardContent className="flex gap-2">
+                          <Button
+                            aria-label={`Move ${video.title} up`}
+                            disabled={index === 0}
+                            onClick={() =>
+                              setData((current) =>
+                                moveVideo(current, selectedProject.id, video.id, "up"),
+                              )
+                            }
+                            size="icon"
+                            type="button"
+                            variant="outline"
+                          >
+                            <ArrowUp />
+                          </Button>
+                          <Button
+                            aria-label={`Move ${video.title} down`}
+                            disabled={index === videos.length - 1}
+                            onClick={() =>
+                              setData((current) =>
+                                moveVideo(current, selectedProject.id, video.id, "down"),
+                              )
+                            }
+                            size="icon"
+                            type="button"
+                            variant="outline"
+                          >
+                            <ArrowDown />
+                          </Button>
+                          <Button
+                            className="ml-auto"
+                            onClick={() =>
+                              setData((current) =>
+                                removeVideo(current, selectedProject.id, video.id),
+                              )
+                            }
+                            size="lg"
+                            type="button"
+                            variant="destructive"
+                          >
+                            <Trash2 />
+                            Remove
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </div>
+              </CardContent>
+            </>
           ) : (
-            <div className="flex min-h-[480px] items-center justify-center rounded-lg border border-dashed border-white/15 bg-[#101214] p-8 text-center">
-              <div>
-                <h2 className="text-2xl font-semibold">Create your first project</h2>
-                <p className="mt-2 max-w-md text-sm leading-6 text-neutral-400">
-                  Projects group Gumlet videos for one client review link. Add a project from the
-                  left panel to start.
-                </p>
-              </div>
-            </div>
+            <CardContent>
+              <Empty className="min-h-[480px]" variant="outline">
+                <EmptyHeader>
+                  <EmptyTitle className="text-2xl">Create your first project</EmptyTitle>
+                  <EmptyDescription className="max-w-md text-sm leading-6">
+                    Projects group Gumlet videos for one client review link. Add a project from the
+                    left panel to start.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </CardContent>
           )}
-        </section>
+        </Card>
       </div>
     </main>
   );

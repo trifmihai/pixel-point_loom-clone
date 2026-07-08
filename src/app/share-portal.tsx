@@ -1,6 +1,26 @@
 import * as React from "react";
 import { CheckCircle2, MessageSquarePlus } from "lucide-react";
 
+import {
+  Badge,
+  Button,
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+  Field,
+  FieldLabel,
+  Input,
+  Separator,
+  Textarea,
+} from "@/toolcraft/ui";
+
 import { GumletPlayer } from "./gumlet-player";
 import { loadPortalData } from "./portal-store";
 import type {
@@ -101,9 +121,9 @@ function getVideoMeta(video: PortalVideo): string {
     return `Suggested ${video.recommendedPlaybackSpeed}x`;
   }
 
-  return `${formatDuration(video.durationSeconds)} video · Suggested ${
+  return `${formatDuration(video.durationSeconds)} video - Suggested ${
     video.recommendedPlaybackSpeed
-  }x · Watch in about ${formatDuration(watchTime)} · Saves about ${formatDuration(savedTime)}`;
+  }x - Watch in about ${formatDuration(watchTime)} - Saves about ${formatDuration(savedTime)}`;
 }
 
 function getStatusLabel(status: ViewingProgressStatus | undefined): string {
@@ -114,6 +134,19 @@ function getStatusLabel(status: ViewingProgressStatus | undefined): string {
       return "Watched";
     default:
       return "Not started";
+  }
+}
+
+function getStatusVariant(
+  status: ViewingProgressStatus | undefined,
+): React.ComponentProps<typeof Badge>["variant"] {
+  switch (status) {
+    case "watched":
+      return "secondary";
+    case "in-progress":
+      return "emphasisOutline";
+    default:
+      return "mutedOutline";
   }
 }
 
@@ -191,192 +224,235 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
 
   if (!project) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-[#101214] px-4 text-neutral-50">
-        <div className="max-w-md rounded-lg border border-white/10 bg-[#171a1d] p-6 text-center">
-          <h1 className="text-2xl font-semibold">Share link not found</h1>
-          <p className="mt-2 text-sm leading-6 text-neutral-400">
-            This link does not include a project snapshot, and no local project matches this slug.
-          </p>
-        </div>
+      <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
+        <Card className="max-w-md text-center">
+          <CardHeader>
+            <CardTitle aria-level={1} className="text-2xl" role="heading">
+              Share link not found
+            </CardTitle>
+            <CardDescription className="text-sm leading-6">
+              This link does not include a project snapshot, and no local project matches this slug.
+            </CardDescription>
+          </CardHeader>
+        </Card>
       </main>
     );
   }
 
   return (
-    <main className="min-h-dvh bg-[#101214] text-neutral-50">
+    <main className="min-h-dvh bg-[color:var(--background)] text-[color:var(--foreground)]">
       <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-5 px-4 py-5 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:px-6">
         <section className="min-w-0 space-y-4">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-normal text-emerald-300">
-              {project.clientName || "Client review"}
-            </p>
-            <h1 className="mt-1 text-3xl font-semibold">{project.name}</h1>
-            {project.description ? (
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-                {project.description}
-              </p>
-            ) : null}
-          </div>
+          <Card>
+            <CardHeader>
+              <Badge className="w-fit" variant="emphasisOutline">
+                {project.clientName || "Client review"}
+              </Badge>
+              <CardTitle aria-level={1} className="text-3xl font-semibold" role="heading">
+                {project.name}
+              </CardTitle>
+              {project.description ? (
+                <CardDescription className="max-w-3xl text-sm leading-6">
+                  {project.description}
+                </CardDescription>
+              ) : null}
+            </CardHeader>
+          </Card>
 
           {selectedVideo ? (
             <>
               <GumletPlayer seekSeconds={seekSeconds} video={selectedVideo} />
-              <div className="rounded-lg border border-white/10 bg-[#171a1d] p-4">
-                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <Card>
+                <CardHeader className="gap-3 md:grid-cols-[1fr_auto]">
                   <div>
-                    <h2 className="text-2xl font-semibold">{selectedVideo.title}</h2>
-                    <p className="mt-1 text-sm text-neutral-300">{getVideoMeta(selectedVideo)}</p>
+                    <CardTitle aria-level={2} className="text-2xl" role="heading">
+                      {selectedVideo.title}
+                    </CardTitle>
+                    <CardDescription className="text-sm">
+                      {getVideoMeta(selectedVideo)}
+                    </CardDescription>
                     {selectedVideo.description ? (
-                      <p className="mt-3 text-sm leading-6 text-neutral-400">
+                      <p className="mt-3 text-sm leading-6 text-[color:var(--muted-foreground)]">
                         {selectedVideo.description}
                       </p>
                     ) : null}
                   </div>
-                  <button
-                    className="inline-flex items-center gap-2 rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-100 hover:bg-emerald-500/20"
-                    onClick={() =>
-                      setProgress((current) => ({
-                        ...current,
-                        [selectedVideo.id]: "watched",
-                      }))
-                    }
-                    type="button"
-                  >
-                    <CheckCircle2 size={16} />
-                    Mark watched
-                  </button>
-                </div>
-              </div>
+                  <CardAction className="static col-auto row-auto justify-self-start md:justify-self-end">
+                    <Button
+                      onClick={() =>
+                        setProgress((current) => ({
+                          ...current,
+                          [selectedVideo.id]: "watched",
+                        }))
+                      }
+                      size="lg"
+                      type="button"
+                      variant="outline"
+                    >
+                      <CheckCircle2 />
+                      Mark watched
+                    </Button>
+                  </CardAction>
+                </CardHeader>
+              </Card>
 
-              <section className="rounded-lg border border-white/10 bg-[#171a1d] p-4">
-                <h3 className="text-lg font-semibold">Feedback</h3>
-                <form className="mt-3 grid gap-3 md:grid-cols-2" onSubmit={handleSubmitFeedback}>
-                  <label className="block text-sm font-medium text-neutral-200">
-                    Your name
-                    <input
-                      className="mt-1 w-full rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-emerald-400"
-                      onChange={(event) =>
-                        setFeedbackDraft((draft) => ({
-                          ...draft,
-                          authorName: event.target.value,
-                        }))
-                      }
-                      required
-                      value={feedbackDraft.authorName}
-                    />
-                  </label>
-                  <label className="block text-sm font-medium text-neutral-200">
-                    Email
-                    <input
-                      className="mt-1 w-full rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-emerald-400"
-                      onChange={(event) =>
-                        setFeedbackDraft((draft) => ({
-                          ...draft,
-                          authorEmail: event.target.value,
-                        }))
-                      }
-                      type="email"
-                      value={feedbackDraft.authorEmail}
-                    />
-                  </label>
-                  <label className="block text-sm font-medium text-neutral-200">
-                    Timestamp
-                    <input
-                      className="mt-1 w-full rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-emerald-400"
-                      inputMode="numeric"
-                      onChange={(event) =>
-                        setFeedbackDraft((draft) => ({
-                          ...draft,
-                          timestampSeconds: event.target.value,
-                        }))
-                      }
-                      value={feedbackDraft.timestampSeconds}
-                    />
-                  </label>
-                  <label className="block text-sm font-medium text-neutral-200 md:col-span-2">
-                    Feedback
-                    <textarea
-                      className="mt-1 min-h-24 w-full rounded-md border border-white/10 bg-[#0d0f11] px-3 py-2 text-sm text-white outline-none focus:border-emerald-400"
-                      onChange={(event) =>
-                        setFeedbackDraft((draft) => ({
-                          ...draft,
-                          commentText: event.target.value,
-                        }))
-                      }
-                      required
-                      value={feedbackDraft.commentText}
-                    />
-                  </label>
-                  <button
-                    className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-400 md:w-fit"
-                    type="submit"
-                  >
-                    <MessageSquarePlus size={16} />
-                    Add comment at current time
-                  </button>
-                </form>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Feedback</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <form className="grid gap-3 md:grid-cols-2" onSubmit={handleSubmitFeedback}>
+                    <Field>
+                      <FieldLabel htmlFor="feedback-author-name">Your name</FieldLabel>
+                      <Input
+                        id="feedback-author-name"
+                        onChange={(event) =>
+                          setFeedbackDraft((draft) => ({
+                            ...draft,
+                            authorName: event.target.value,
+                          }))
+                        }
+                        required
+                        size="lg"
+                        value={feedbackDraft.authorName}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="feedback-author-email">Email</FieldLabel>
+                      <Input
+                        id="feedback-author-email"
+                        onChange={(event) =>
+                          setFeedbackDraft((draft) => ({
+                            ...draft,
+                            authorEmail: event.target.value,
+                          }))
+                        }
+                        size="lg"
+                        type="email"
+                        value={feedbackDraft.authorEmail}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="feedback-timestamp">Timestamp</FieldLabel>
+                      <Input
+                        id="feedback-timestamp"
+                        inputMode="numeric"
+                        onChange={(event) =>
+                          setFeedbackDraft((draft) => ({
+                            ...draft,
+                            timestampSeconds: event.target.value,
+                          }))
+                        }
+                        size="lg"
+                        value={feedbackDraft.timestampSeconds}
+                      />
+                    </Field>
+                    <Field className="md:col-span-2">
+                      <FieldLabel htmlFor="feedback-comment">Feedback</FieldLabel>
+                      <Textarea
+                        id="feedback-comment"
+                        onChange={(event) =>
+                          setFeedbackDraft((draft) => ({
+                            ...draft,
+                            commentText: event.target.value,
+                          }))
+                        }
+                        required
+                        size="xl"
+                        value={feedbackDraft.commentText}
+                      />
+                    </Field>
+                    <Button className="md:w-fit" size="xl" type="submit">
+                      <MessageSquarePlus />
+                      Add comment at current time
+                    </Button>
+                  </form>
 
-                <div className="mt-4 space-y-3">
-                  {selectedComments.length > 0 ? (
-                    selectedComments.map((comment) => (
-                      <article
-                        className="rounded-md border border-white/10 bg-[#101214] p-3"
-                        key={comment.id}
-                      >
-                        <div className="flex flex-wrap items-center gap-2 text-sm">
-                          <span className="font-semibold text-white">{comment.authorName}</span>
-                          {comment.timestampSeconds ? (
-                            <button
-                              className="rounded bg-white/10 px-2 py-1 text-xs text-emerald-100 hover:bg-white/15"
-                              onClick={() => setSeekSeconds(comment.timestampSeconds)}
-                              type="button"
-                            >
-                              {formatDuration(comment.timestampSeconds)}
-                            </button>
-                          ) : null}
-                        </div>
-                        <p className="mt-2 text-sm leading-6 text-neutral-300">
-                          {comment.commentText}
-                        </p>
-                      </article>
-                    ))
-                  ) : (
-                    <p className="text-sm text-neutral-400">No feedback on this video yet.</p>
-                  )}
-                </div>
-              </section>
+                  <Separator className="my-4" />
+
+                  <div className="space-y-3">
+                    {selectedComments.length > 0 ? (
+                      selectedComments.map((comment) => (
+                        <Card
+                          className="bg-[color:color-mix(in_oklab,var(--background)_82%,var(--card))]"
+                          key={comment.id}
+                          size="sm"
+                        >
+                          <CardHeader>
+                            <CardTitle className="flex flex-wrap items-center gap-2">
+                              <span>{comment.authorName}</span>
+                              {comment.timestampSeconds ? (
+                                <Button
+                                  onClick={() => setSeekSeconds(comment.timestampSeconds)}
+                                  size="xs"
+                                  type="button"
+                                  variant="outline"
+                                >
+                                  {formatDuration(comment.timestampSeconds)}
+                                </Button>
+                              ) : null}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="text-sm leading-6 text-[color:var(--muted-foreground)]">
+                            {comment.commentText}
+                          </CardContent>
+                        </Card>
+                      ))
+                    ) : (
+                      <Empty className="min-h-32" variant="outline">
+                        <EmptyHeader>
+                          <EmptyTitle>No feedback yet</EmptyTitle>
+                          <EmptyDescription>No feedback on this video yet.</EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             </>
           ) : (
-            <div className="rounded-lg border border-dashed border-white/15 bg-[#171a1d] p-8 text-center text-neutral-400">
-              No videos are available in this share link.
-            </div>
+            <Empty className="min-h-[320px]" variant="outline">
+              <EmptyHeader>
+                <EmptyTitle>No videos available</EmptyTitle>
+                <EmptyDescription>No videos are available in this share link.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </section>
 
-        <aside className="space-y-3 rounded-lg border border-white/10 bg-[#171a1d] p-4 lg:sticky lg:top-5 lg:self-start">
-          <h2 className="text-lg font-semibold">Videos</h2>
-          {videos.map((video) => (
-            <button
-              className={`w-full rounded-lg border p-3 text-left ${
-                selectedVideo?.id === video.id
-                  ? "border-emerald-400/60 bg-emerald-400/10"
-                  : "border-white/10 bg-[#101214] hover:border-white/20"
-              }`}
-              key={video.id}
-              onClick={() => {
-                setSelectedVideoId(video.id);
-                setSeekSeconds(undefined);
-              }}
-              type="button"
-            >
-              <span className="block font-medium text-white">{video.title}</span>
-              <span className="mt-1 block text-xs text-neutral-400">{getVideoMeta(video)}</span>
-              <span className="mt-2 inline-flex rounded-full bg-white/10 px-2 py-1 text-xs text-neutral-300">
-                {getStatusLabel(progress[video.id])}
-              </span>
-            </button>
-          ))}
-        </aside>
+        <Card className="h-fit lg:sticky lg:top-5">
+          <CardHeader>
+            <CardTitle className="text-lg">Videos</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {videos.map((video) => (
+              <Button
+                className={`!h-auto w-full justify-start whitespace-normal px-3 py-3 text-left ${
+                  selectedVideo?.id === video.id
+                    ? "border-emerald-400/60 bg-emerald-400/10 text-white"
+                    : "text-white"
+                }`}
+                key={video.id}
+                onClick={() => {
+                  setSelectedVideoId(video.id);
+                  setSeekSeconds(undefined);
+                }}
+                type="button"
+                variant="outline"
+              >
+                <span className="flex min-w-0 flex-col items-start gap-2">
+                  <span className="font-medium">{video.title}</span>
+                  <span className="text-xs text-[color:var(--muted-foreground)]">
+                    {getVideoMeta(video)}
+                  </span>
+                  <Badge variant={getStatusVariant(progress[video.id])}>
+                    {getStatusLabel(progress[video.id])}
+                  </Badge>
+                </span>
+              </Button>
+            ))}
+          </CardContent>
+        </Card>
       </div>
     </main>
   );
