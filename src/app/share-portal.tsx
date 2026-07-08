@@ -373,11 +373,7 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
                   <div className="space-y-3">
                     {selectedComments.length > 0 ? (
                       selectedComments.map((comment) => (
-                        <Card
-                          className="bg-[color:color-mix(in_oklab,var(--background)_82%,var(--card))]"
-                          key={comment.id}
-                          size="sm"
-                        >
+                        <Card key={comment.id} size="sm">
                           <CardHeader>
                             <CardTitle className="flex flex-wrap items-center gap-2">
                               <span>{comment.authorName}</span>

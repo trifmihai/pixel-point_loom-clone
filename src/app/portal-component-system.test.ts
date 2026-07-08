@@ -25,4 +25,11 @@ describe("portal component system usage", () => {
     expect(source).not.toMatch(/<select\b/);
     expect(source).not.toMatch(/<option\b/);
   });
+
+  test.each(portalFiles)("%s lets shared card surfaces own their styling", (fileName) => {
+    const source = readPortalFile(fileName);
+
+    expect(source).not.toMatch(/<Card[^>]*className={[^}]*bg-\[color:color-mix/);
+    expect(source).not.toMatch(/<Card[^>]*className="[^"]*bg-\[/);
+  });
 });

@@ -258,7 +258,7 @@ export function AdminPortal(): React.JSX.Element {
   return (
     <main className="min-h-dvh bg-[color:var(--background)] text-[color:var(--foreground)]">
       <div className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-5 px-4 py-4 lg:grid lg:grid-cols-[360px_minmax(0,1fr)] lg:px-6">
-        <Card className="h-fit bg-[color:color-mix(in_oklab,var(--card)_92%,black)]">
+        <Card className="h-fit">
           <CardHeader>
             <Badge className="w-fit" variant="emphasisOutline">
               Gumlet portal
@@ -346,7 +346,7 @@ export function AdminPortal(): React.JSX.Element {
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 bg-[color:color-mix(in_oklab,var(--card)_88%,black)]">
+        <Card className="min-w-0">
           {selectedProject ? (
             <>
               <CardHeader className="gap-4 xl:grid-cols-[1fr_auto]">
@@ -460,7 +460,7 @@ export function AdminPortal(): React.JSX.Element {
                   </Badge>
                 ) : null}
 
-                <Card className="bg-[color:color-mix(in_oklab,var(--background)_82%,var(--card))]">
+                <Card>
                   <CardHeader>
                     <CardTitle>Add Gumlet video</CardTitle>
                     <CardDescription>
@@ -580,7 +580,7 @@ export function AdminPortal(): React.JSX.Element {
                     {activeVideo ? (
                       <div className="space-y-3">
                         <GumletPlayer video={activeVideo} />
-                        <Card className="bg-[color:color-mix(in_oklab,var(--card)_92%,black)]">
+                        <Card>
                           <CardHeader>
                           <CardTitle aria-level={2} className="text-2xl" role="heading">
                             {activeVideo.title}
@@ -612,7 +612,7 @@ export function AdminPortal(): React.JSX.Element {
                         className={
                           activeVideo?.id === video.id
                             ? "border border-sky-400/60 bg-sky-400/10"
-                            : "bg-[color:color-mix(in_oklab,var(--background)_82%,var(--card))]"
+                            : undefined
                         }
                         key={video.id}
                         size="sm"

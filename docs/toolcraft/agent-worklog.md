@@ -43,6 +43,22 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Skipped checks: Full performance suite skipped because this Tier 2 pass does not change renderer workload, Gumlet iframe behavior, routing, storage, or export paths.
 - Risks: The portal still uses ordinary layout tags where no Toolcraft component is appropriate; this is intentional and keeps semantic page structure straightforward.
 
+### Iteration 3 - Component surface verification
+
+- Request: Check whether the app was being served from another port/link and fix why the UI still looked like shadcn components were not applied.
+- Task type: Visual mismatch and component-system verification.
+- User-visible result: Confirmed `http://127.0.0.1:3002/` serves this project through `/.toolcraft/server-identity.json`, verified the live DOM contains Toolcraft UI `data-slot` markers, and removed app-specific arbitrary background overrides from `Card` surfaces so shared component styling owns card surfaces.
+- Source/reference checked: Running dev server on port `3002`, Toolcraft identity endpoint, live browser DOM via Playwright, portal component source, component-system guard test.
+- Docs/contracts read: `superpowers:systematic-debugging`, local `browser` skill, `superpowers:test-driven-development`.
+- Contract rules applied: Investigate root cause before changes, add a failing test before production edits, keep route/store/Gumlet behavior unchanged.
+- Decision: Treat the issue as masked component styling, not a wrong URL. Keep selection-state backgrounds where they convey state, but remove arbitrary Card background utilities.
+- Alternatives rejected: Restarting on a new port because `3002` already verified as the current project; replacing the component library because the existing Toolcraft UI components are present and rendered.
+- State/output mapping: No data-flow changes; the same admin/share flows now render with default Card surfaces rather than app-specific surface overrides.
+- Files changed: `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, `src/app/portal-component-system.test.ts`, `docs/toolcraft/agent-worklog.md`.
+- Verification: Component-system guard failed first on custom Card background overrides, then passed after cleanup. Browser screenshot and DOM inspection confirmed `3002` renders Toolcraft UI slots.
+- Skipped checks: Full performance suite skipped because this Tier 2 visual/component pass does not affect renderer workload or playback behavior.
+- Risks: The Toolcraft/shadcn-style theme is intentionally quiet and dark, so the visual difference is subtle even when the components are correctly applied.
+
 ## Decisions
 
 ### Renderer
@@ -100,6 +116,9 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Run: `npm.cmd run typecheck` passed after refactor.
 - Run: `npm.cmd run test` passed after refactor.
 - Run: `npm.cmd exec -- playwright test e2e/app-controls.spec.ts e2e/app-browser-acceptance.spec.ts --reporter=list` passed after refactor.
+- Run: `Invoke-WebRequest http://127.0.0.1:3002/.toolcraft/server-identity.json` returned this project root.
+- Run: live Playwright DOM probe on `http://127.0.0.1:3002/` found visible `data-slot` markers for `card`, `button`, `input`, `textarea`, `field`, `field-label`, `badge`, and `empty`.
+- Run: `npm.cmd exec -- vitest run src/app/portal-component-system.test.ts` failed on arbitrary Card background overrides, then passed after Card surface cleanup.
 
 ## Risks
 
