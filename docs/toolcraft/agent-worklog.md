@@ -161,6 +161,23 @@ The app is now a Gumlet client video portal with local fallback plus optional Cl
 - Skipped checks: Full performance checkpoint skipped because this post-first-working pass changes data/API/security/routing and visible DOM flows, not canvas, renderer, animation, export, or performance-sensitive controls. Full browser suite is pending a clean Playwright teardown run because the focused run hung during teardown after passing its test cases.
 - Risks: Cloudflare Access must be configured outside the app for real admin protection. The included rate limiter is best-effort per isolate, not a global distributed limiter. Passcode hashing uses browser/Worker SHA-256 and is not a slow password KDF. Token security depends on keeping admin APIs behind Cloudflare Access and monitoring D1/Functions usage.
 
+### Iteration 10 - Protected admin route split
+
+- Request: Move the admin dashboard fully to `/admin`, keep public share/video/API-token routes public, keep `/api/admin/*` server-side protected, add a public `/api/health`, and make `/` redirect to `/admin` without rendering the admin UI there.
+- Task type: Post-first-working route security and deployment verification bug fix.
+- User-visible result: `/admin` owns the dashboard. `/` is only a lightweight redirect/landing route. `/share/:token`, `/video/:token`, legacy `?data=` links, and `/api/public/share/:token` remain public. `/api/health` returns `{ ok: true, service: "portal-api" }` without Cloudflare Access or D1.
+- Source/reference checked: User request, current TanStack route tree, Cloudflare Pages `_redirects`, shared API handler, Pages Function wrapper, existing deployment/API/browser tests.
+- Reference inputs: User request only; no visual reference supplied.
+- Docs/contracts read: `AGENTS.md`, `docs/toolcraft/workflow.md`, `docs/toolcraft/assembly-workflow.md`, local `systematic-debugging`, local `writing-plans`, and `superpowers:test-driven-development`.
+- Contract rules applied: Keep route files thin, keep public client routes unchanged, keep admin API auth in the server handler, test route/security behavior before implementation, and avoid adding new Cloudflare products.
+- Decision: Add a dedicated `src/routes/admin.tsx` for `AdminPortal`, make `src/routes/index.tsx` a minimal redirect to `/admin`, add `/admin` SPA rewrite rules, and handle `/api/health` before admin auth or D1 access.
+- Alternatives rejected: Protecting `/` with Cloudflare Access because the requested Access policy is `/admin*`; duplicating admin UI on `/`; touching public share token behavior; adding any paid Cloudflare service for health checks.
+- State/output mapping: TanStack routes map `/admin` to `AdminHome`, `/` to `<Navigate to="/admin" />`, `/share/$slug` and `/video/$slug` to existing public portals. `handlePortalApiRequest` maps `/api/health` to a static JSON response before admin/public-token routing, while `/api/admin/*` still runs the Cloudflare Access email check.
+- Files changed: `src/routes/root.tsx`, `src/routes/index.tsx`, `src/routes/admin.tsx`, `src/app/portal-cloud-api.ts`, `functions/api/[[path]].ts`, `public/_redirects`, `src/app/deployment-config.test.ts`, `src/app/portal-cloud-api.test.ts`, `e2e/app-controls.spec.ts`, `e2e/app-browser-acceptance.spec.ts`, `docs/deployment-zero-cost.md`, `docs/toolcraft/agent-worklog.md`.
+- Verification: `npx vitest run src/app/portal-cloud-api.test.ts src/app/deployment-config.test.ts` failed first on missing `/api/health`, missing `/admin` route, and missing admin rewrite rules; after implementation it passed 13 focused tests. `npm run typecheck` passed. `npm run build` passed with Vite's existing large chunk warning. Focused Playwright `root redirects` test reported 1 `ok` browser test, then the Playwright runner hung during teardown and only the recent test-runner/web-server Node processes were stopped.
+- Skipped checks: Full performance checkpoint skipped because this route/API split does not affect renderer/canvas/export performance. Full browser suite was not rerun because the focused Playwright runner again hung after printing the passing test.
+- Risks: Cloudflare Access must actually be configured to protect `/admin*` and `/api/admin/*`; the app now aligns with that policy, but Cloudflare controls enforcement before the app loads.
+
 ## Decisions
 
 ### Renderer

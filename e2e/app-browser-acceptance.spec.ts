@@ -39,6 +39,13 @@ const shareProjectFixture: PortalProject = {
   visibility: "unlisted",
 };
 
+test("browser: root redirects to the protected admin route", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page.getByRole("heading", { name: "Client video reviews" })).toBeVisible();
+});
+
 test("browser: share page opens an encoded project and records timestamped feedback", async ({
   page,
 }) => {

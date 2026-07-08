@@ -5,7 +5,7 @@ import { portalStorageKey } from "../src/app/portal-store";
 test("browser: admin creates a project, adds a Gumlet video, and exposes a share link", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/admin");
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
 

@@ -2,6 +2,7 @@ import { Outlet, createRootRoute, createRoute } from "@tanstack/react-router";
 
 import { SharePortal } from "../app/share-portal";
 import { VideoSharePortal } from "../app/video-share-portal";
+import { AdminHome } from "./admin";
 import { AppHome } from "./index";
 
 function RootLayout(): React.JSX.Element {
@@ -16,6 +17,12 @@ const indexRoute = createRoute({
   component: AppHome,
   getParentRoute: () => rootRoute,
   path: "/",
+});
+
+const adminRoute = createRoute({
+  component: AdminHome,
+  getParentRoute: () => rootRoute,
+  path: "/admin",
 });
 
 const shareRoute = createRoute({
@@ -50,4 +57,4 @@ function VideoRoute(): React.JSX.Element {
   return <VideoSharePortal encodedData={data} slug={slug} />;
 }
 
-export const routeTree = rootRoute.addChildren([indexRoute, shareRoute, videoRoute]);
+export const routeTree = rootRoute.addChildren([indexRoute, adminRoute, shareRoute, videoRoute]);

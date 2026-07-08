@@ -72,6 +72,23 @@ async function json<T>(response: Response): Promise<T> {
 }
 
 describe("portal cloud API", () => {
+  it("serves public health without Cloudflare Access or D1 access", async () => {
+    const throwingDb: MemoryPortalCloudDatabase = new Proxy(new MemoryPortalCloudDatabase(), {
+      get() {
+        throw new Error("D1 should not be touched by health checks");
+      },
+    });
+    const runtime = createRuntime(throwingDb);
+
+    const response = await handlePortalApiRequest(createRequest("/api/health"), runtime);
+
+    expect(response.status).toBe(200);
+    await expect(json(response)).resolves.toEqual({
+      ok: true,
+      service: "portal-api",
+    });
+  });
+
   it("rejects unauthenticated and non-admin admin API requests", async () => {
     const runtime = createRuntime();
 

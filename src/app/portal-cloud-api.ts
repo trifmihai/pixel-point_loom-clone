@@ -495,6 +495,17 @@ export async function handlePortalApiRequest(
     return errorResponse(404, "not_found", "API route not found.");
   }
 
+  if (pathParts[1] === "health" && pathParts.length === 2) {
+    if (request.method !== "GET") {
+      return errorResponse(405, "method_not_allowed", "This health route only accepts GET.");
+    }
+
+    return jsonResponse({
+      ok: true,
+      service: "portal-api",
+    });
+  }
+
   if (pathParts[1] === "admin") {
     const authorization = authorizeAdmin(request, runtime);
 

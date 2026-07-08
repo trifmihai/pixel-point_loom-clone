@@ -1,6 +1,13 @@
 name = "pixel-point-loom-clone"
 pages_build_output_dir = "dist"
 
+[vars]
+VITE_PUBLIC_APP_URL = "https://pixel-point-loom-clone.pages.dev"
+VITE_CLOUD_SYNC_ENABLED = "true"
+VITE_ADMIN_EMAIL = "trifmihai.business@gmail.com"
+PUBLIC_APP_URL = "https://pixel-point-loom-clone.pages.dev"
+ADMIN_EMAIL = "trifmihai.business@gmail.com"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "portal-prod"

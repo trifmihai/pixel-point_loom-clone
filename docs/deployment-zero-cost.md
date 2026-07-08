@@ -30,8 +30,8 @@ share tokens, and passcode hashes. Videos remain hosted on Gumlet.
 - Build command: `npm run build`.
 - Output directory: `dist`.
 - Pages Functions directory: `functions`.
-- SPA fallback: `public/_redirects` keeps `/share/:token` and `/video/:token`
-  refresh-safe.
+- SPA fallback: `public/_redirects` keeps `/admin`, `/share/:token`, and
+  `/video/:token` refresh-safe.
 - Static security headers: `public/_headers`.
 
 ## D1 Setup
@@ -66,7 +66,10 @@ Protect the admin route at Cloudflare, not in client JavaScript:
    - `/video/*`
    - `/share/*`
    - `/api/public/share/*`
-5. Cloudflare Access must forward
+   - `/api/health`
+5. Also protect `/api/admin/*` with the same Access policy if the Cloudflare
+   product routing UI requires API path rules separately from `/admin*`.
+6. Cloudflare Access must forward
    `Cf-Access-Authenticated-User-Email`; admin APIs reject missing or
    non-matching email headers.
 
