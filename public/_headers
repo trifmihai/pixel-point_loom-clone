@@ -1,0 +1,5 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://video.gumlet.io https://*.gumlet.io; media-src 'self' blob: https://video.gumlet.io https://*.gumlet.io; frame-src https://play.gumlet.io; connect-src 'self' https://play.gumlet.io https://video.gumlet.io https://*.gumlet.io; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'

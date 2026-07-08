@@ -4,6 +4,11 @@ const gumletEmbedBaseUrl = "https://play.gumlet.io/embed";
 
 export const playbackSpeedOptions = [1, 1.25, 1.5, 1.75, 2] as const;
 
+type PortalAppOriginOptions = {
+  configuredUrl?: string;
+  currentOrigin: string;
+};
+
 function clampSeconds(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
     return 0;
@@ -158,6 +163,54 @@ export function createShareUrl(project: PortalProject, origin: string): string {
   url.searchParams.set("data", encodeShareProject(project));
 
   return url.toString();
+}
+
+export function normalizePublicAppUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim() ?? "";
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(trimmed);
+
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return undefined;
+    }
+
+    url.hash = "";
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    url.search = "";
+
+    return url.origin + (url.pathname === "/" ? "" : url.pathname);
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolvePortalAppOrigin({
+  configuredUrl,
+  currentOrigin,
+}: PortalAppOriginOptions): string {
+  return normalizePublicAppUrl(configuredUrl) ?? currentOrigin;
+}
+
+export function getPortalAppOrigin(currentOrigin = window.location.origin): string {
+  return resolvePortalAppOrigin({
+    configuredUrl: import.meta.env.VITE_PUBLIC_APP_URL,
+    currentOrigin,
+  });
+}
+
+export function isLocalAppOrigin(origin: string): boolean {
+  try {
+    const hostname = new URL(origin).hostname;
+
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
 }
 
 function getVideoShareProject(project: PortalProject): VideoShareSnapshot["project"] {

@@ -4,6 +4,7 @@ import type { PortalProject } from "./portal-types";
 import {
   buildGumletEmbedUrl,
   calculatePlaybackSavings,
+  createShareUrl,
   createVideoShareUrl,
   createShareSlug,
   decodeShareVideoSnapshot,
@@ -13,7 +14,10 @@ import {
   estimateWatchTimeSeconds,
   formatDuration,
   formatSavedTime,
+  isLocalAppOrigin,
+  normalizePublicAppUrl,
   parseGumletInput,
+  resolvePortalAppOrigin,
 } from "./portal-utils";
 
 const projectFixture: PortalProject = {
@@ -136,5 +140,46 @@ describe("portal utilities", () => {
       },
       video: projectFixture.videos[0],
     });
+  });
+
+  it("normalizes and resolves the configured public app URL", () => {
+    expect(normalizePublicAppUrl("https://pixel-point-loom-clone.pages.dev/")).toBe(
+      "https://pixel-point-loom-clone.pages.dev",
+    );
+    expect(normalizePublicAppUrl("https://example.com/app///?ignored=true#hash")).toBe(
+      "https://example.com/app",
+    );
+    expect(normalizePublicAppUrl("mailto:team@example.com")).toBeUndefined();
+    expect(
+      resolvePortalAppOrigin({
+        configuredUrl: "https://pixel-point-loom-clone.pages.dev/",
+        currentOrigin: "http://localhost:3002",
+      }),
+    ).toBe("https://pixel-point-loom-clone.pages.dev");
+    expect(
+      resolvePortalAppOrigin({
+        configuredUrl: "",
+        currentOrigin: "http://localhost:3002",
+      }),
+    ).toBe("http://localhost:3002");
+  });
+
+  it("keeps production share URLs off localhost when a public app URL is configured", () => {
+    const publicOrigin = resolvePortalAppOrigin({
+      configuredUrl: "https://pixel-point-loom-clone.pages.dev",
+      currentOrigin: "http://127.0.0.1:3002",
+    });
+    const projectUrl = createShareUrl(projectFixture, publicOrigin);
+    const videoUrl = createVideoShareUrl(projectFixture, projectFixture.videos[0]!, publicOrigin);
+
+    expect(projectUrl).toMatch(/^https:\/\/pixel-point-loom-clone\.pages\.dev\/share\//);
+    expect(videoUrl).toMatch(/^https:\/\/pixel-point-loom-clone\.pages\.dev\/video\//);
+    expect(`${projectUrl}\n${videoUrl}`).not.toMatch(/localhost|127\.0\.0\.1/);
+  });
+
+  it("detects local app origins that need a client-link warning", () => {
+    expect(isLocalAppOrigin("http://localhost:3002")).toBe(true);
+    expect(isLocalAppOrigin("http://127.0.0.1:3002")).toBe(true);
+    expect(isLocalAppOrigin("https://pixel-point-loom-clone.pages.dev")).toBe(false);
   });
 });

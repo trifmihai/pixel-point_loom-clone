@@ -79,4 +79,26 @@ describe("portal store reducers", () => {
     ]);
     expect(reordered.projects[0]?.videos.map((video) => video.orderIndex)).toEqual([0, 1]);
   });
+
+  it("clears stale video duration when an edited asset requests a refresh", () => {
+    const withProject = addProject(emptyData, { name: "Walkthrough" });
+    const projectId = withProject.projects[0]!.id;
+    const withVideo = addVideoToProject(withProject, projectId, {
+      assetId: "asset-a",
+      durationSeconds: 600,
+      recommendedPlaybackSpeed: 1.5,
+      title: "First",
+    });
+    const videoId = withVideo.projects[0]!.videos[0]!.id;
+    const edited = updateVideo(withVideo, projectId, videoId, {
+      assetId: "asset-b",
+      durationSeconds: null,
+    });
+
+    expect(edited.projects[0]?.videos[0]).toMatchObject({
+      assetId: "asset-b",
+      title: "First",
+    });
+    expect(edited.projects[0]?.videos[0]?.durationSeconds).toBeUndefined();
+  });
 });

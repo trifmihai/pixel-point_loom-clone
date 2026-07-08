@@ -6,7 +6,7 @@ This file records product decisions and the evidence behind them.
 
 Mode: product
 
-The app is now a local-first Gumlet client video portal. It organizes existing Gumlet videos, creates encoded project and single-video share links, embeds Gumlet videos, starts direct MP4 video pages at the selected speed, and collects timestamped feedback locally.
+The app is now a Gumlet client video portal with local fallback plus optional Cloudflare D1 cloud sync. It organizes existing Gumlet videos, creates tokenized project and single-video share links when cloud sync is enabled, keeps encoded links as legacy fallback, embeds Gumlet videos, starts direct MP4 video pages at the selected speed, and collects timestamped feedback locally on client pages.
 
 ## Decision Trail
 
@@ -110,6 +110,57 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Skipped checks: Full browser performance skipped because this Tier 2 fix changes DOM controls, iframe messaging, routing behavior, and local metadata, not renderer workload.
 - Risks: Gumlet and the browser can still block forced unmuted playback inside a cross-origin iframe. The app now makes the unmuted request from the user click and shows an explicit status, but the iframe's own sound control may still be required if Gumlet rejects the command.
 
+### Iteration 7 - Confirmed Gumlet player.js hardening
+
+- Request: Continue the real Gumlet video flow fix without restarting; verify the actual Gumlet iframe behavior, keep the overlay visible until playback is confirmed, add duration fallback handling, clear stale duration on asset changes, and improve edit/delete UX.
+- Task type: Post-first-working product playback hardening, duration-state bug fix, and admin control refinement.
+- User-visible result: Gumlet single-video links now use the confirmed `player.js` command protocol, request duration from the live embed, keep the start overlay visible while playback is only attempting, hide it only after play plus selected speed are confirmed, and show the required fallback copy if playback cannot be confirmed. Admin edits clear stale duration when the Gumlet asset/link changes unless a new duration is explicitly entered, and each video card has a Refresh duration action.
+- Source/reference checked: User attachment, running local app, real Gumlet embed at `https://play.gumlet.io/embed/6707bf60f0a80d006151c369`, Gumlet player chunk behavior observed in browser, existing adapter/player/share/admin/store code, focused unit/browser failures.
+- Reference inputs: User supplied real Gumlet asset ID, embed/watch/thumbnail/MP4 URLs, screenshots, and the latest pasted-text request.
+- Docs/contracts read: `AGENTS.md`, `docs/toolcraft/workflow.md`, `docs/toolcraft/component-rules.md`, `docs/toolcraft/acceptance-testing.md`, local `systematic-debugging`, local `brainstorming`, local `writing-plans`, local `browser`, `superpowers:test-driven-development`.
+- Contract rules applied: Investigate actual runtime before fix, write tests before implementation, use Toolcraft/shadcn components for visible controls, keep iframe fallback messaging honest, update worklog before completion, and skip full performance only because this post-first-working change does not touch renderer workload.
+- Decision: Prefer Gumlet's confirmed `player.js` v3 postMessage protocol (`play`, `unmute`, `setVolume` with value `100`, `setPlaybackRate`, `getDuration`, `getPlaybackRate`, `getMuted`, `getVolume`, and event listeners) and retain older object-shaped commands only as fallback compatibility messages.
+- Alternatives rejected: Continuing to mark success immediately after posting guessed commands because that hid failures from users; reloading the iframe with `autoplay=true` because the real Gumlet embed mutes autoplay; preserving old durations after an asset change because that can show fake savings for the wrong video.
+- State/output mapping: `GumletPlayer` posts confirmed `player.js` commands, parses ready/duration/playback-rate/play/muted/volume events, and reports them upward. `VideoSharePortal` maps duration events into CTA savings, maps play plus matching speed into overlay dismissal, and maps missing confirmations into fallback copy. `AdminPortal` maps edit asset changes into a null duration patch, maps Refresh duration into an active preview duration request, and maps preview duration events back to localStorage.
+- Files changed: `src/app/gumlet-player-adapter.ts`, `src/app/gumlet-player.tsx`, `src/app/video-share-portal.tsx`, `src/app/admin-portal.tsx`, `src/app/portal-store.ts`, `src/app/gumlet-player-adapter.test.ts`, `src/app/portal-store.test.ts`, `e2e/app-browser-acceptance.spec.ts`, `e2e/app-controls.spec.ts`, `docs/superpowers/plans/2026-07-08-gumlet-hardening.md`, `docs/toolcraft/agent-worklog.md`.
+- Verification: `npm.cmd exec -- vitest run src/app/gumlet-player-adapter.test.ts src/app/portal-store.test.ts` first failed on parser expectations, then passed 8 tests. `npm.cmd run typecheck` passed. `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` passed 6 browser tests after fixing late audio confirmation status. `npm.cmd run verify:quick` passed docs/integrity, Node tests, and 30 Vitest tests. `npm.cmd run build` passed. A real Gumlet headless browser probe against asset `6707bf60f0a80d006151c369` detected pre-click `1:44`, `1:09`, and `saves 35s`; after click, Gumlet `videoTag` reported `duration: 103.979`, `playbackRate: 1.5`, `muted: false`, `volume: 1`, and `paused: false`.
+- Skipped checks: Full browser performance skipped because this is a post-first-working DOM/iframe messaging and local-storage behavior fix with no custom renderer, canvas, animation, export, or heavy workload path.
+- Risks: The app now verifies Gumlet play and selected speed from player events before hiding the overlay, and the real probe confirmed unmuted playback in Chromium. Browser or Gumlet policy can still vary by environment, so the fallback copy remains visible when confirmation does not arrive.
+
+### Iteration 8 - Cloudflare Pages production hardening
+
+- Request: Finalize production readiness for the deployed Cloudflare Pages app, keep hosting static-only and zero-cost, make copied links use `VITE_PUBLIC_APP_URL`, add SPA refresh routing, security headers, warnings, documentation, and verification.
+- Task type: Post-first-working deployment hardening and static hosting configuration.
+- User-visible result: Admin copy/open links resolve through the configured public app URL, local-only share links show a warning before copying, unlisted-link limitations are visible near share controls, direct `/share/:slug` and `/video/:slug` refreshes are covered by Cloudflare `_redirects`, and static security headers are configured for the next Cloudflare Pages deployment.
+- Source/reference checked: User-provided Cloudflare Pages URL and env var, current admin/share/video routes, `public` static asset state, Vite build output, live deployed Pages URL, focused browser probes, Toolcraft contracts.
+- Reference inputs: User supplied deployed URL `https://pixel-point-loom-clone.pages.dev/`, production env var `VITE_PUBLIC_APP_URL=https://pixel-point-loom-clone.pages.dev/`, and the production hardening checklist.
+- Docs/contracts read: `AGENTS.md`, `docs/toolcraft/workflow.md`, `docs/toolcraft/component-rules.md`, `docs/toolcraft/acceptance-testing.md`, local `systematic-debugging`, local `brainstorming`, local `writing-plans`, local `browser`.
+- Contract rules applied: Keep deployment static-only, do not add backend services or paid Cloudflare products, use Toolcraft UI components for warnings, add tests before final claims, run Tier 2 verification and browser acceptance, update worklog before completion.
+- Decision: Add static Pages files (`public/_redirects`, `public/_headers`) and a client-side public-origin resolver instead of adding Workers, Pages Functions, or any storage/proxy layer. Treat links as unlisted snapshots and document that URL data is encoded, not private or encrypted.
+- Alternatives rejected: Cloudflare Workers/Functions/KV/R2/D1/Durable Objects/Stream/Images because the app must stay zero-cost static hosting; custom domain because Pages subdomain is sufficient; Gumlet API integration because videos remain hosted and privacy-controlled in Gumlet.
+- State/output mapping: `getPortalAppOrigin()` reads `VITE_PUBLIC_APP_URL` at build/dev time and falls back to `window.location.origin`; admin copy/open actions pass that origin into project/video URL builders; local-origin detection drives warning copy; `_redirects` maps direct SPA paths back to `index.html`; `_headers` applies static security headers after deployment.
+- Files changed: `public/_redirects`, `public/_headers`, `src/app/portal-utils.ts`, `src/app/admin-portal.tsx`, `src/app/portal-utils.test.ts`, `src/app/deployment-config.test.ts`, `e2e/app-browser-acceptance.spec.ts`, `e2e/app-controls.spec.ts`, `docs/deployment-zero-cost.md`, `docs/superpowers/plans/2026-07-08-cloudflare-production-hardening.md`, `docs/toolcraft/agent-worklog.md`.
+- Verification: `npm.cmd run typecheck` first failed on a missing test import, then passed. `npm.cmd run test` passed docs/integrity, Node tests, and 35 Vitest tests. `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` first hit strict selector issues, then passed 7 browser tests. `npm.cmd run build` passed and copied `_redirects` and `_headers` into `dist`. `npm.cmd run verify:quick` passed. Manual deployed probe created a project/video on `https://pixel-point-loom-clone.pages.dev/`, copied a video link starting with the public Pages URL and no localhost, opened it in a separate browser context, refreshed it, confirmed Gumlet iframe and CTA savings, then verified edit and delete. Live header probe showed current deployment has `nosniff` and referrer policy; the new CSP and Permissions-Policy are present in repo/build and require the next Cloudflare Pages deploy to become live.
+- Skipped checks: Full browser performance skipped because this post-first-working Tier 2 pass changes static hosting config, link generation, warnings, docs, and tests, not renderer workload or performance-sensitive controls.
+- Risks: Current live deployment does not show the newly added CSP and Permissions-Policy until these changes are redeployed. Shared URLs remain unlisted, not private or encrypted; real privacy must be enforced in Gumlet.
+
+### Iteration 9 - ShipFast-inspired Cloudflare architecture
+
+- Request: Use the ShipFast repo only as architectural inspiration and make the Gumlet portal production-ready with cross-device admin data, protected admin access, secure token share links, optional passcodes, and Cloudflare-native storage/functions without adding paid SaaS features or migrating from Vite.
+- Task type: Tier 4 architecture and production persistence/security pass.
+- User-visible result: The app now has central app config, admin cloud/local status UI, local-project import to cloud, optional share passcodes, tokenized copy/open links in cloud mode, public token loading for `/share/:token` and `/video/:token`, and passcode gates before protected client details.
+- Source/reference checked: User attachment, existing Gumlet portal code, current Cloudflare Pages deployment docs, local Toolcraft docs, and the explicit ShipFast concepts listed in the prompt.
+- Reference inputs: Source repo URL `https://github.com/trifmihai/ship-fast-ts` was used only as a conceptual reference from the user's requested pattern list; no source code was copied.
+- Docs/contracts read: `AGENTS.md`, `docs/toolcraft/workflow.md`, `docs/toolcraft/assembly-workflow.md`, `docs/toolcraft/decision-contract.md`, `docs/toolcraft/component-rules.md`, `docs/toolcraft/acceptance-testing.md`, local `brainstorming`, local `writing-plans`, local `systematic-debugging`, local `browser`, `superpowers:test-driven-development`, and `superpowers:verification-before-completion`.
+- Contract rules applied: Keep current Vite/TanStack app, keep Toolcraft/shadcn UI components, keep localStorage fallback/import source, avoid paid services and dependency bloat, write API tests before implementation, and verify visible token/passcode routes in a real browser.
+- Decision: Add a minimal Cloudflare Pages Functions API and D1 schema for metadata/tokens, with Cloudflare Access as the admin gate and native `fetch` as the only API client.
+- Alternatives rejected: Next.js/NextAuth, MongoDB/Mongoose, Stripe/Resend/Crisp/DaisyUI, Gumlet API keys in frontend code, storing/proxying video files, and embedding full project/video data in new share URLs.
+- State/output mapping: Admin state loads from D1 through `/api/admin/projects` when `VITE_CLOUD_SYNC_ENABLED=true`; local data stays in localStorage for fallback/import. Admin copy/open actions call `/api/admin/share-links` to create `/share/:token` or `/video/:token`; public pages call `/api/public/share/:token` and `/passcode` to load only the authorized project/video.
+- Files changed: `src/app/app-config.ts`, `src/app/portal-api.ts`, `src/app/portal-cloud-api.ts`, `functions/api/[[path]].ts`, `migrations/0001_portal.sql`, `wrangler.toml`, `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, `src/app/video-share-portal.tsx`, `src/app/share-passcode-gate.tsx`, `src/app/deployment-config.test.ts`, `src/app/portal-cloud-api.test.ts`, `e2e/app-browser-acceptance.spec.ts`, `docs/deployment-zero-cost.md`, `docs/superpowers/plans/2026-07-09-shipfast-cloudflare-architecture.md`, `docs/toolcraft/agent-worklog.md`.
+- Verification: `.\node_modules\.bin\vitest.cmd run src/app/portal-cloud-api.test.ts` failed first on the missing API module, then passed 7 API tests after implementation. `.\node_modules\.bin\vitest.cmd run src/app/deployment-config.test.ts` failed first on missing config/client files, then passed 3 tests after implementation. `npm.cmd run typecheck` passed after adding `functions` to `tsconfig.json`. `npm.cmd run verify:quick` passed docs/integrity, Node tests, AI check, and 43 Vitest tests. `npm.cmd run build` passed with Vite's existing large chunk warning. Focused Playwright token/passcode tests reported 3 `ok` browser tests, then the Playwright runner hung during teardown and was stopped by killing only the recent test runner/web-server Node processes. `npm.cmd run dev` reported the app already running on `http://127.0.0.1:3002/`.
+- Skipped checks: Full performance checkpoint skipped because this post-first-working pass changes data/API/security/routing and visible DOM flows, not canvas, renderer, animation, export, or performance-sensitive controls. Full browser suite is pending a clean Playwright teardown run because the focused run hung during teardown after passing its test cases.
+- Risks: Cloudflare Access must be configured outside the app for real admin protection. The included rate limiter is best-effort per isolate, not a global distributed limiter. Passcode hashing uses browser/Worker SHA-256 and is not a slow password KDF. Token security depends on keeping admin APIs behind Cloudflare Access and monitoring D1/Functions usage.
+
 ## Decisions
 
 ### Renderer
@@ -138,9 +189,9 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 
 ### Export
 
-- Decision: No image/video export actions.
+- Decision: No image/video export actions; metadata backup/export is handled through Cloudflare D1 tools and localStorage import remains available.
 - Reason: Gumlet owns video playback and hosting; the portal only shares links and feedback.
-- Evidence: No Gumlet upload/edit/export APIs are present; share links are encoded snapshots.
+- Evidence: No Gumlet upload/edit/export APIs are present; new cloud share links are token records in D1 and legacy encoded snapshots remain fallback-only.
 
 ### Performance
 
@@ -183,6 +234,19 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` first failed on missing Gumlet iframe duration/action controls, then printed 4 passing browser tests after implementation; the Playwright runner process remained open in the tool backend after the pass output.
 - Run: `npm.cmd run build` passed after adding the Gumlet iframe adapter and admin edit/delete dialogs.
 - Run: `npm.cmd run verify:quick` passed after adding the Gumlet iframe adapter and admin edit/delete dialogs.
+- Run: `npm.cmd exec -- vitest run src/app/gumlet-player-adapter.test.ts src/app/portal-store.test.ts` first failed on parser expectations, then passed 8 tests after the confirmed `player.js` adapter hardening.
+- Run: `npm.cmd run typecheck` passed after the Gumlet hardening pass.
+- Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` passed 6 affected browser tests after Gumlet confirmation, fallback, admin duration, refresh, and delete coverage.
+- Run: `npm.cmd run verify:quick` passed after the Gumlet hardening pass.
+- Run: `npm.cmd run build` passed after the Gumlet hardening pass.
+- Run: real Gumlet Playwright probe against `https://play.gumlet.io/embed/6707bf60f0a80d006151c369` passed; before click the CTA showed original duration, accelerated watch time, and saved time, and after click the live Gumlet `videoTag` reported duration `103.979`, playback rate `1.5`, muted `false`, volume `1`, and paused `false`.
+- Run: `npm.cmd run typecheck` first failed on a missing `createShareUrl` test import, then passed after the Cloudflare production hardening changes.
+- Run: `npm.cmd run test` passed after adding public URL and deployment config tests, with 35 Vitest tests and Toolcraft docs/integrity checks passing.
+- Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` first failed on two strict selectors, then passed 7 affected browser tests after selector fixes.
+- Run: `npm.cmd run build` passed after adding Cloudflare `_redirects` and `_headers`; `dist/_redirects` and `dist/_headers` were present.
+- Run: `npm.cmd run verify:quick` passed after the Cloudflare production hardening changes.
+- Run: deployed Cloudflare Pages browser probe passed for public video link, no localhost, incognito open, `/video/...` refresh, Gumlet iframe, stored-duration savings, edit video, and delete video.
+- Run: deployed HEAD request showed live `x-content-type-options: nosniff` and `referrer-policy: strict-origin-when-cross-origin`; new CSP and Permissions-Policy are in `public/_headers` and `dist/_headers` for the next deployment.
 
 ## Risks
 

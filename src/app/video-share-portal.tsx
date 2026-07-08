@@ -13,19 +13,35 @@ import {
 } from "@/toolcraft/ui";
 
 import { GumletPlayer, type GumletPlayerHandle } from "./gumlet-player";
+import { getPortalApiErrorMessage, portalApi, type PublicShareResponse } from "./portal-api";
 import { loadPortalData, savePortalData, updateVideo } from "./portal-store";
-import type { PortalVideo, VideoShareSnapshot } from "./portal-types";
+import type { PortalProject, PortalVideo, VideoShareSnapshot } from "./portal-types";
+import { SharePasscodeGate } from "./share-passcode-gate";
 import {
   calculatePlaybackSavings,
   decodeShareVideoSnapshot,
   formatDuration,
   formatSavedTime,
 } from "./portal-utils";
+import type { GumletPlayerMessage } from "./gumlet-player-adapter";
 
 type VideoSharePortalProps = {
   encodedData?: string;
   slug: string;
 };
+
+type GumletPlaybackAttempt = {
+  active: boolean;
+  playbackStarted: boolean;
+  speedConfirmed: boolean;
+  unmutedConfirmed: boolean;
+  volumeConfirmed: boolean;
+};
+
+const durationDetectionTimeoutMs = 6000;
+const gumletPlaybackFallbackTimeoutMs = 4500;
+const durationFallbackMessage =
+  "Duration not detected yet. Add duration in the video settings to show time saved.";
 
 function getSlugSuffix(value: string): string {
   return (
@@ -60,6 +76,40 @@ function loadVideoSnapshot(slug: string, encodedData?: string): VideoShareSnapsh
         video,
       };
     }
+  }
+
+  return null;
+}
+
+function getVideoShareProject(project: PortalProject): VideoShareSnapshot["project"] {
+  return {
+    clientName: project.clientName,
+    id: project.id,
+    name: project.name,
+    shareSlug: project.shareSlug,
+  };
+}
+
+function getSnapshotFromPublicResponse(response: PublicShareResponse): VideoShareSnapshot | null {
+  if ("requiresPasscode" in response && response.requiresPasscode) {
+    return null;
+  }
+
+  if (response.kind === "video" && "snapshot" in response) {
+    return response.snapshot;
+  }
+
+  if (response.kind === "share" && "project" in response) {
+    const video = [...response.project.videos].sort(
+      (left, right) => left.orderIndex - right.orderIndex,
+    )[0];
+
+    return video
+      ? {
+          project: getVideoShareProject(response.project),
+          video,
+        }
+      : null;
   }
 
   return null;
@@ -103,6 +153,10 @@ function persistResolvedDuration(
   savePortalData(updateVideo(storedData, projectId, videoId, { durationSeconds }));
 }
 
+function getGumletPlaybackFallbackMessage(playbackSpeed: number): string {
+  return `Playback was requested at ${playbackSpeed}x. If Gumlet still shows 1x or muted audio, use the player controls.`;
+}
+
 export function VideoSharePortal({
   encodedData,
   slug,
@@ -110,12 +164,28 @@ export function VideoSharePortal({
   const [snapshot, setSnapshot] = React.useState<VideoShareSnapshot | null>(() =>
     loadVideoSnapshot(slug, encodedData),
   );
+  const [tokenStatus, setTokenStatus] = React.useState<
+    "error" | "idle" | "loading" | "passcode"
+  >(() => (snapshot || encodedData ? "idle" : "loading"));
+  const [tokenError, setTokenError] = React.useState("");
+  const [passcodeDraft, setPasscodeDraft] = React.useState("");
+  const [passcodeLoading, setPasscodeLoading] = React.useState(false);
   const [started, setStarted] = React.useState(false);
+  const [gumletStartPending, setGumletStartPending] = React.useState(false);
   const [gumletPlaybackStatus, setGumletPlaybackStatus] = React.useState("");
+  const [durationDetectionTimedOut, setDurationDetectionTimedOut] = React.useState(false);
   const [metadataDurationSeconds, setMetadataDurationSeconds] = React.useState<
     number | undefined
   >();
   const gumletPlayerRef = React.useRef<GumletPlayerHandle | null>(null);
+  const gumletAttemptRef = React.useRef<GumletPlaybackAttempt>({
+    active: false,
+    playbackStarted: false,
+    speedConfirmed: false,
+    unmutedConfirmed: false,
+    volumeConfirmed: false,
+  });
+  const gumletFallbackTimeoutRef = React.useRef<number | null>(null);
   const nativeVideoRef = React.useRef<HTMLVideoElement | null>(null);
   const video = snapshot?.video ?? null;
   const project = snapshot?.project ?? null;
@@ -130,6 +200,70 @@ export function VideoSharePortal({
   const watchTimeLabel = playbackSavings
     ? `Watch in about ${formatDuration(playbackSavings.fasterSeconds)}`
     : null;
+  const durationButtonMeta = durationDetectionTimedOut ? durationFallbackMessage : "Loading duration";
+
+  React.useEffect(() => {
+    const legacySnapshot = loadVideoSnapshot(slug, encodedData);
+
+    if (legacySnapshot) {
+      setSnapshot(legacySnapshot);
+      setTokenStatus("idle");
+      setTokenError("");
+      return undefined;
+    }
+
+    if (encodedData) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    setTokenStatus("loading");
+    setTokenError("");
+
+    void portalApi
+      .getPublicShare(slug)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        if ("requiresPasscode" in response && response.requiresPasscode) {
+          setTokenStatus("passcode");
+          return;
+        }
+
+        const nextSnapshot = getSnapshotFromPublicResponse(response);
+
+        if (!nextSnapshot) {
+          setTokenStatus("error");
+          setTokenError("This share token did not include a video.");
+          return;
+        }
+
+        setSnapshot(nextSnapshot);
+        setTokenStatus("idle");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        setTokenStatus("error");
+        setTokenError(getPortalApiErrorMessage(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [encodedData, slug]);
+
+  const clearGumletFallbackTimer = React.useCallback(() => {
+    if (gumletFallbackTimeoutRef.current !== null) {
+      window.clearTimeout(gumletFallbackTimeoutRef.current);
+      gumletFallbackTimeoutRef.current = null;
+    }
+  }, []);
 
   const handleResolvedDuration = React.useCallback(
     (durationSeconds: number) => {
@@ -159,6 +293,39 @@ export function VideoSharePortal({
     },
     [project, video],
   );
+
+  React.useEffect(() => {
+    setStarted(false);
+    setGumletStartPending(false);
+    setGumletPlaybackStatus("");
+    setMetadataDurationSeconds(undefined);
+    setDurationDetectionTimedOut(false);
+    gumletAttemptRef.current = {
+      active: false,
+      playbackStarted: false,
+      speedConfirmed: false,
+      unmutedConfirmed: false,
+      volumeConfirmed: false,
+    };
+    clearGumletFallbackTimer();
+  }, [clearGumletFallbackTimer, video?.assetId, video?.directVideoUrl, video?.id]);
+
+  React.useEffect(() => {
+    if (!video || effectiveDurationSeconds) {
+      setDurationDetectionTimedOut(false);
+      return undefined;
+    }
+
+    setDurationDetectionTimedOut(false);
+
+    const timeout = window.setTimeout(() => {
+      setDurationDetectionTimedOut(true);
+    }, durationDetectionTimeoutMs);
+
+    return () => window.clearTimeout(timeout);
+  }, [effectiveDurationSeconds, video]);
+
+  React.useEffect(() => () => clearGumletFallbackTimer(), [clearGumletFallbackTimer]);
 
   const applyNativePlaybackSettings = React.useCallback((options?: { audible?: boolean }) => {
     const player = nativeVideoRef.current;
@@ -199,20 +366,102 @@ export function VideoSharePortal({
     }
   }
 
-  function handleStart(): void {
-    const player = nativeVideoRef.current;
+  function handleGumletPlaybackEvent(message: GumletPlayerMessage): void {
+    if (!video || video.directVideoUrl) {
+      return;
+    }
 
-    setStarted(true);
-    setGumletPlaybackStatus("");
+    const wasActiveAttempt = gumletAttemptRef.current.active;
+    const nextAttempt = {
+      ...gumletAttemptRef.current,
+      playbackStarted:
+        gumletAttemptRef.current.playbackStarted || message.playbackStarted === true,
+      speedConfirmed:
+        gumletAttemptRef.current.speedConfirmed ||
+        (message.playbackRate !== undefined &&
+          Math.abs(message.playbackRate - video.recommendedPlaybackSpeed) < 0.01),
+      unmutedConfirmed:
+        gumletAttemptRef.current.unmutedConfirmed || message.muted === false,
+      volumeConfirmed:
+        gumletAttemptRef.current.volumeConfirmed ||
+        (message.volume !== undefined && message.volume > 0),
+    };
 
-    if (!video?.directVideoUrl) {
-      gumletPlayerRef.current?.startReview();
+    gumletAttemptRef.current = nextAttempt;
+
+    if (
+      !wasActiveAttempt &&
+      nextAttempt.playbackStarted &&
+      nextAttempt.speedConfirmed &&
+      (nextAttempt.unmutedConfirmed || nextAttempt.volumeConfirmed)
+    ) {
       setGumletPlaybackStatus(
-        `Requested unmuted playback at ${video?.recommendedPlaybackSpeed ?? 1}x. If Gumlet still asks to enable sound, use the player sound control.`,
+        `Playback confirmed at ${video.recommendedPlaybackSpeed}x with sound on.`,
       );
       return;
     }
 
+    if (!wasActiveAttempt) {
+      return;
+    }
+
+    if (nextAttempt.playbackStarted && nextAttempt.speedConfirmed) {
+      gumletAttemptRef.current = {
+        ...nextAttempt,
+        active: false,
+      };
+      clearGumletFallbackTimer();
+      setStarted(true);
+      setGumletStartPending(false);
+      setGumletPlaybackStatus(
+        nextAttempt.unmutedConfirmed || nextAttempt.volumeConfirmed
+          ? `Playback confirmed at ${video.recommendedPlaybackSpeed}x with sound on.`
+          : `Playback confirmed at ${video.recommendedPlaybackSpeed}x. Sound was requested at full volume.`,
+      );
+    }
+  }
+
+  function handleStart(): void {
+    const player = nativeVideoRef.current;
+
+    setGumletPlaybackStatus("");
+
+    if (!video?.directVideoUrl) {
+      if (!video) {
+        return;
+      }
+
+      clearGumletFallbackTimer();
+      setGumletStartPending(true);
+      setGumletPlaybackStatus(
+        `Attempting to start playback at ${video.recommendedPlaybackSpeed}x with sound.`,
+      );
+      gumletAttemptRef.current = {
+        active: true,
+        playbackStarted: false,
+        speedConfirmed: false,
+        unmutedConfirmed: false,
+        volumeConfirmed: false,
+      };
+      gumletPlayerRef.current?.startReview();
+      gumletFallbackTimeoutRef.current = window.setTimeout(() => {
+        if (!gumletAttemptRef.current.active) {
+          return;
+        }
+
+        gumletAttemptRef.current = {
+          ...gumletAttemptRef.current,
+          active: false,
+        };
+        setGumletStartPending(false);
+        setGumletPlaybackStatus(
+          getGumletPlaybackFallbackMessage(video.recommendedPlaybackSpeed),
+        );
+      }, gumletPlaybackFallbackTimeoutMs);
+      return;
+    }
+
+    setStarted(true);
     applyNativePlaybackSettings({ audible: true });
     void player?.play().then(
       () => applyNativePlaybackSettings({ audible: true }),
@@ -220,6 +469,62 @@ export function VideoSharePortal({
         applyNativePlaybackSettings({ audible: true });
         setStarted(false);
       },
+    );
+  }
+
+  async function handleSubmitPasscode(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setPasscodeLoading(true);
+    setTokenError("");
+
+    try {
+      const response = await portalApi.unlockPublicShare(slug, passcodeDraft);
+      const nextSnapshot = getSnapshotFromPublicResponse(response);
+
+      if (!nextSnapshot) {
+        setTokenStatus("passcode");
+        setTokenError("This passcode did not unlock a video.");
+        return;
+      }
+
+      setSnapshot(nextSnapshot);
+      setTokenStatus("idle");
+      setPasscodeDraft("");
+    } catch (error) {
+      setTokenError(getPortalApiErrorMessage(error));
+    } finally {
+      setPasscodeLoading(false);
+    }
+  }
+
+  if (tokenStatus === "loading") {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
+        <Card className="max-w-md text-center">
+          <CardHeader>
+            <CardTitle aria-level={1} className="text-2xl" role="heading">
+              Loading video link
+            </CardTitle>
+            <CardDescription className="text-sm leading-6">
+              Checking this secure video token.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </main>
+    );
+  }
+
+  if (tokenStatus === "passcode") {
+    return (
+      <SharePasscodeGate
+        description="Enter the passcode provided with this video link."
+        error={tokenError}
+        loading={passcodeLoading}
+        onPasscodeChange={setPasscodeDraft}
+        onSubmit={(event) => void handleSubmitPasscode(event)}
+        passcode={passcodeDraft}
+        title="Protected video"
+      />
     );
   }
 
@@ -232,7 +537,8 @@ export function VideoSharePortal({
               Video link not found
             </CardTitle>
             <CardDescription className="text-sm leading-6">
-              This link does not include a video snapshot, and no local video matches this slug.
+              {tokenError ||
+                "This link does not include a video snapshot, and no local video matches this slug."}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -274,8 +580,8 @@ export function VideoSharePortal({
           ) : (
             <GumletPlayer
               ref={gumletPlayerRef}
-              autoplay={started}
               onDuration={handleResolvedDuration}
+              onPlaybackEvent={handleGumletPlaybackEvent}
               video={video}
             />
           )}
@@ -297,13 +603,24 @@ export function VideoSharePortal({
                       </span>
                     ) : null}
                     {savedTimeLabel ? <span className="block">{savedTimeLabel}</span> : null}
+                    {!playbackSavings && durationDetectionTimedOut ? (
+                      <span className="block">{durationFallbackMessage}</span>
+                    ) : null}
+                    {gumletStartPending ? (
+                      <span className="block">
+                        Attempting to start playback at {video.recommendedPlaybackSpeed}x.
+                      </span>
+                    ) : null}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <Button className="w-full" onClick={handleStart} size="xl" type="button">
                     <Play />
                     <span className="flex min-w-0 flex-col items-start gap-1 text-left">
-                      <span>Start {video.recommendedPlaybackSpeed}x review</span>
+                      <span>
+                        {gumletStartPending ? "Starting" : "Start"}{" "}
+                        {video.recommendedPlaybackSpeed}x review
+                      </span>
                       {playbackSavings && playbackSavings.savedSeconds > 0 ? (
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium">
                           <del className="text-white/70">
@@ -313,7 +630,9 @@ export function VideoSharePortal({
                           <span>saves {formatSavedTime(playbackSavings.savedSeconds)}</span>
                         </span>
                       ) : (
-                        <span className="text-xs font-medium text-white/70">Loading duration</span>
+                        <span className="text-xs font-medium text-white/70">
+                          {durationButtonMeta}
+                        </span>
                       )}
                     </span>
                   </Button>

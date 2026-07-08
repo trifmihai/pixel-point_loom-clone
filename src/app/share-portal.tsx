@@ -22,13 +22,16 @@ import {
 } from "@/toolcraft/ui";
 
 import { GumletPlayer } from "./gumlet-player";
+import { getPortalApiErrorMessage, portalApi, type PublicShareResponse } from "./portal-api";
 import { loadPortalData } from "./portal-store";
 import type {
   PortalComment,
   PortalProject,
   PortalVideo,
+  VideoShareSnapshot,
   ViewingProgressStatus,
 } from "./portal-types";
+import { SharePasscodeGate } from "./share-passcode-gate";
 import {
   decodeShareProject,
   estimateTimeSavedSeconds,
@@ -75,6 +78,36 @@ function loadProject(slug: string, encodedData?: string): PortalProject | null {
   }
 
   return loadPortalData().projects.find((project) => project.shareSlug === slug) ?? null;
+}
+
+function createProjectFromVideoSnapshot(snapshot: VideoShareSnapshot): PortalProject {
+  return {
+    clientName: snapshot.project.clientName,
+    createdAt: snapshot.video.createdAt,
+    description: undefined,
+    id: snapshot.project.id,
+    name: snapshot.project.name,
+    shareSlug: snapshot.project.shareSlug,
+    updatedAt: snapshot.video.updatedAt,
+    videos: [snapshot.video],
+    visibility: "unlisted",
+  };
+}
+
+function getProjectFromPublicResponse(response: PublicShareResponse): PortalProject | null {
+  if ("requiresPasscode" in response && response.requiresPasscode) {
+    return null;
+  }
+
+  if (response.kind === "share" && "project" in response) {
+    return response.project;
+  }
+
+  if (response.kind === "video" && "snapshot" in response) {
+    return createProjectFromVideoSnapshot(response.snapshot);
+  }
+
+  return null;
 }
 
 function loadComments(projectId: string): PortalComment[] {
@@ -151,7 +184,15 @@ function getStatusVariant(
 }
 
 export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.Element {
-  const [project] = React.useState<PortalProject | null>(() => loadProject(slug, encodedData));
+  const [project, setProject] = React.useState<PortalProject | null>(() =>
+    loadProject(slug, encodedData),
+  );
+  const [tokenStatus, setTokenStatus] = React.useState<
+    "error" | "idle" | "loading" | "passcode"
+  >(() => (project || encodedData ? "idle" : "loading"));
+  const [tokenError, setTokenError] = React.useState("");
+  const [passcodeDraft, setPasscodeDraft] = React.useState("");
+  const [passcodeLoading, setPasscodeLoading] = React.useState(false);
   const videos = project ? getSortedVideos(project) : [];
   const [selectedVideoId, setSelectedVideoId] = React.useState(() => videos[0]?.id ?? "");
   const [feedbackDraft, setFeedbackDraft] = React.useState<FeedbackDraft>(emptyFeedbackDraft);
@@ -165,6 +206,82 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
 
   const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? videos[0] ?? null;
   const selectedComments = comments.filter((comment) => comment.videoId === selectedVideo?.id);
+
+  React.useEffect(() => {
+    const legacyProject = loadProject(slug, encodedData);
+
+    if (legacyProject) {
+      setProject(legacyProject);
+      setTokenStatus("idle");
+      setTokenError("");
+      return undefined;
+    }
+
+    if (encodedData) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    setTokenStatus("loading");
+    setTokenError("");
+
+    void portalApi
+      .getPublicShare(slug)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        if ("requiresPasscode" in response && response.requiresPasscode) {
+          setTokenStatus("passcode");
+          return;
+        }
+
+        const nextProject = getProjectFromPublicResponse(response);
+
+        if (!nextProject) {
+          setTokenStatus("error");
+          setTokenError("This share token did not include a project.");
+          return;
+        }
+
+        setProject(nextProject);
+        setTokenStatus("idle");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        setTokenStatus("error");
+        setTokenError(getPortalApiErrorMessage(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [encodedData, slug]);
+
+  React.useEffect(() => {
+    if (!project) {
+      return;
+    }
+
+    setComments(loadComments(project.id));
+    setProgress(loadProgress(project.id));
+  }, [project]);
+
+  React.useEffect(() => {
+    if (!videos.length) {
+      setSelectedVideoId("");
+      return;
+    }
+
+    if (!videos.some((video) => video.id === selectedVideoId)) {
+      setSelectedVideoId(videos[0]?.id ?? "");
+    }
+  }, [selectedVideoId, videos]);
 
   React.useEffect(() => {
     if (!project || !selectedVideo) {
@@ -222,6 +339,62 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
     setFeedbackDraft(emptyFeedbackDraft);
   }
 
+  async function handleSubmitPasscode(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setPasscodeLoading(true);
+    setTokenError("");
+
+    try {
+      const response = await portalApi.unlockPublicShare(slug, passcodeDraft);
+      const nextProject = getProjectFromPublicResponse(response);
+
+      if (!nextProject) {
+        setTokenStatus("passcode");
+        setTokenError("This passcode did not unlock a project.");
+        return;
+      }
+
+      setProject(nextProject);
+      setTokenStatus("idle");
+      setPasscodeDraft("");
+    } catch (error) {
+      setTokenError(getPortalApiErrorMessage(error));
+    } finally {
+      setPasscodeLoading(false);
+    }
+  }
+
+  if (tokenStatus === "loading") {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
+        <Card className="max-w-md text-center">
+          <CardHeader>
+            <CardTitle aria-level={1} className="text-2xl" role="heading">
+              Loading review link
+            </CardTitle>
+            <CardDescription className="text-sm leading-6">
+              Checking this secure share token.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </main>
+    );
+  }
+
+  if (tokenStatus === "passcode") {
+    return (
+      <SharePasscodeGate
+        description="Enter the passcode provided with this review link."
+        error={tokenError}
+        loading={passcodeLoading}
+        onPasscodeChange={setPasscodeDraft}
+        onSubmit={(event) => void handleSubmitPasscode(event)}
+        passcode={passcodeDraft}
+        title="Protected review"
+      />
+    );
+  }
+
   if (!project) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
@@ -231,7 +404,8 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
               Share link not found
             </CardTitle>
             <CardDescription className="text-sm leading-6">
-              This link does not include a project snapshot, and no local project matches this slug.
+              {tokenError ||
+                "This link does not include a project snapshot, and no local project matches this slug."}
             </CardDescription>
           </CardHeader>
         </Card>

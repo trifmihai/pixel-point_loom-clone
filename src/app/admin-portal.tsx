@@ -3,15 +3,23 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  Cloud,
+  CloudOff,
   Copy,
   ExternalLink,
+  HardDriveUpload,
   MoreHorizontal,
   Pencil,
   Plus,
+  RefreshCw,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -60,7 +68,9 @@ import {
   SelectValue,
 } from "@/toolcraft/ui/components/primitives";
 
-import { GumletPlayer } from "./gumlet-player";
+import { getAppConfig } from "./app-config";
+import { GumletPlayer, type GumletPlayerHandle } from "./gumlet-player";
+import { getPortalApiErrorMessage, portalApi } from "./portal-api";
 import {
   addProject,
   addVideoToProject,
@@ -80,6 +90,8 @@ import {
   estimateTimeSavedSeconds,
   estimateWatchTimeSeconds,
   formatDuration,
+  getPortalAppOrigin,
+  isLocalAppOrigin,
   playbackSpeedOptions,
 } from "./portal-utils";
 
@@ -104,6 +116,8 @@ type SpeedSelectProps = {
   onValueChange: (value: PlaybackSpeed) => void;
   value: PlaybackSpeed;
 };
+
+type CloudSyncStatus = "error" | "loading" | "local" | "saving" | "synced";
 
 const emptyProjectDraft: ProjectDraft = {
   clientName: "",
@@ -144,6 +158,25 @@ function parseOptionalSeconds(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : undefined;
 }
 
+function getEditDurationPatch(
+  editingVideo: PortalVideo,
+  editVideoDraft: VideoDraft,
+  durationTouched: boolean,
+): null | number | undefined {
+  const originalAssetInput = getDraftFromVideo(editingVideo).assetId.trim();
+  const assetChanged = editVideoDraft.assetId.trim() !== originalAssetInput;
+
+  if (assetChanged && !durationTouched) {
+    return null;
+  }
+
+  if (!editVideoDraft.durationSeconds.trim()) {
+    return durationTouched || assetChanged ? null : undefined;
+  }
+
+  return parseOptionalSeconds(editVideoDraft.durationSeconds) ?? null;
+}
+
 function getSortedVideos(project: PortalProject): PortalVideo[] {
   return [...project.videos].sort((left, right) => left.orderIndex - right.orderIndex);
 }
@@ -182,6 +215,14 @@ function loadInitialData(): PortalData {
   return loadPortalData();
 }
 
+function hasLocalProjects(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return loadPortalData().projects.length > 0;
+}
+
 function SpeedSelect({ ariaLabel, onValueChange, value }: SpeedSelectProps): React.JSX.Element {
   const selected = playbackSpeedItems.find((item) => item.value === String(value));
 
@@ -208,6 +249,7 @@ function SpeedSelect({ ariaLabel, onValueChange, value }: SpeedSelectProps): Rea
 }
 
 export function AdminPortal(): React.JSX.Element {
+  const config = React.useMemo(() => getAppConfig(), []);
   const [data, setData] = React.useState<PortalData>(loadInitialData);
   const [selectedProjectId, setSelectedProjectId] = React.useState<string | null>(
     () => loadInitialData().projects[0]?.id ?? null,
@@ -215,15 +257,107 @@ export function AdminPortal(): React.JSX.Element {
   const [projectDraft, setProjectDraft] = React.useState<ProjectDraft>(emptyProjectDraft);
   const [videoDraft, setVideoDraft] = React.useState<VideoDraft>(emptyVideoDraft);
   const [editVideoDraft, setEditVideoDraft] = React.useState<VideoDraft>(emptyVideoDraft);
+  const [editDurationTouched, setEditDurationTouched] = React.useState(false);
   const [editingVideoId, setEditingVideoId] = React.useState<string | null>(null);
   const [deleteVideoId, setDeleteVideoId] = React.useState<string | null>(null);
   const [activeVideoId, setActiveVideoId] = React.useState<string | null>(null);
+  const [durationRefreshRequest, setDurationRefreshRequest] = React.useState<{
+    nonce: number;
+    videoId: string;
+  } | null>(null);
   const [shareUrl, setShareUrl] = React.useState("");
   const [shareStatus, setShareStatus] = React.useState("");
+  const [sharePasscode, setSharePasscode] = React.useState("");
+  const [cloudStatus, setCloudStatus] = React.useState<CloudSyncStatus>(
+    config.cloudSyncEnabled ? "loading" : "local",
+  );
+  const [cloudMessage, setCloudMessage] = React.useState(
+    config.cloudSyncEnabled
+      ? "Connecting to Cloudflare D1."
+      : "Local projects are stored only in this browser.",
+  );
+  const [browserHasLocalProjects, setBrowserHasLocalProjects] = React.useState(hasLocalProjects);
+  const cloudReadyRef = React.useRef(!config.cloudSyncEnabled);
+  const cloudSaveTimeoutRef = React.useRef<number | null>(null);
+  const previewPlayerRef = React.useRef<GumletPlayerHandle | null>(null);
 
   React.useEffect(() => {
-    savePortalData(data);
-  }, [data]);
+    if (!config.cloudSyncEnabled) {
+      savePortalData(data);
+      setBrowserHasLocalProjects(data.projects.length > 0);
+    }
+
+    if (!config.cloudSyncEnabled || !cloudReadyRef.current) {
+      return undefined;
+    }
+
+    setCloudStatus("saving");
+    setCloudMessage("Saving project metadata to Cloudflare D1.");
+
+    if (cloudSaveTimeoutRef.current !== null) {
+      window.clearTimeout(cloudSaveTimeoutRef.current);
+    }
+
+    cloudSaveTimeoutRef.current = window.setTimeout(() => {
+      void portalApi
+        .saveAdminProjects(data)
+        .then(() => {
+          setCloudStatus("synced");
+          setCloudMessage("Cloud sync saved.");
+        })
+        .catch((error: unknown) => {
+          setCloudStatus("error");
+          setCloudMessage(getPortalApiErrorMessage(error));
+        });
+    }, 500);
+
+    return () => {
+      if (cloudSaveTimeoutRef.current !== null) {
+        window.clearTimeout(cloudSaveTimeoutRef.current);
+      }
+    };
+  }, [config.cloudSyncEnabled, data]);
+
+  React.useEffect(() => {
+    if (!config.cloudSyncEnabled) {
+      cloudReadyRef.current = true;
+      setCloudStatus("local");
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    cloudReadyRef.current = false;
+    setCloudStatus("loading");
+    setCloudMessage("Loading projects from Cloudflare D1.");
+
+    void portalApi
+      .getAdminProjects()
+      .then((cloudData) => {
+        if (cancelled) {
+          return;
+        }
+
+        cloudReadyRef.current = true;
+        setData(cloudData);
+        setSelectedProjectId(cloudData.projects[0]?.id ?? null);
+        setCloudStatus("synced");
+        setCloudMessage("Cloud sync connected.");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        cloudReadyRef.current = false;
+        setCloudStatus("error");
+        setCloudMessage(getPortalApiErrorMessage(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [config.cloudSyncEnabled]);
 
   const selectedProject =
     data.projects.find((project) => project.id === selectedProjectId) ?? data.projects[0] ?? null;
@@ -232,12 +366,26 @@ export function AdminPortal(): React.JSX.Element {
     videos.find((video) => video.id === activeVideoId) ?? videos[0] ?? null;
   const editingVideo = videos.find((video) => video.id === editingVideoId) ?? null;
   const deleteVideo = videos.find((video) => video.id === deleteVideoId) ?? null;
+  const appOrigin = getPortalAppOrigin();
+  const isLocalShareOrigin = isLocalAppOrigin(appOrigin);
 
   React.useEffect(() => {
     if (selectedProject && !selectedProjectId) {
       setSelectedProjectId(selectedProject.id);
     }
   }, [selectedProject, selectedProjectId]);
+
+  React.useEffect(() => {
+    if (!durationRefreshRequest || activeVideo?.id !== durationRefreshRequest.videoId) {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(() => {
+      previewPlayerRef.current?.requestDuration();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeVideo?.id, durationRefreshRequest]);
 
   function handleCreateProject(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -273,30 +421,132 @@ export function AdminPortal(): React.JSX.Element {
     setVideoDraft(emptyVideoDraft);
   }
 
-  async function handleCopyShareLink(project: PortalProject): Promise<void> {
-    const url = createShareUrl(project, window.location.origin);
+  async function createReviewLink(project: PortalProject, video?: PortalVideo): Promise<string> {
+    if (!config.cloudSyncEnabled) {
+      return video ? createVideoShareUrl(project, video, appOrigin) : createShareUrl(project, appOrigin);
+    }
 
+    if (!cloudReadyRef.current) {
+      throw new Error("Cloud sync is not connected yet.");
+    }
+
+    const response = await portalApi.createShareLink({
+      passcode: sharePasscode.trim() || undefined,
+      projectId: project.id,
+      videoId: video?.id,
+    });
+
+    return response.url;
+  }
+
+  async function writeShareLinkToClipboard(url: string, copiedMessage: string, readyMessage: string): Promise<void> {
     setShareUrl(url);
-    setShareStatus("Share link ready");
+    setShareStatus(readyMessage);
 
     try {
       await navigator.clipboard?.writeText(url);
-      setShareStatus("Share link copied");
+      setShareStatus(copiedMessage);
     } catch {
-      setShareStatus("Share link ready");
+      setShareStatus(readyMessage);
+    }
+  }
+
+  async function handleCopyShareLink(project: PortalProject): Promise<void> {
+    try {
+      const url = await createReviewLink(project);
+      const passcodeLabel =
+        config.cloudSyncEnabled && sharePasscode.trim() ? " passcode-protected" : "";
+
+      await writeShareLinkToClipboard(
+        url,
+        config.cloudSyncEnabled
+          ? `Cloud${passcodeLabel} client link copied`
+          : isLocalShareOrigin
+            ? "Local-only share link copied"
+            : "Share link copied",
+        config.cloudSyncEnabled
+          ? `Cloud${passcodeLabel} client link ready`
+          : isLocalShareOrigin
+            ? "Local-only share link ready"
+            : "Share link ready",
+      );
+    } catch (error) {
+      setShareStatus(`Could not create client link: ${getPortalApiErrorMessage(error)}`);
+    }
+  }
+
+  async function handleOpenShareLink(project: PortalProject): Promise<void> {
+    try {
+      const url = await createReviewLink(project);
+
+      setShareUrl(url);
+      setShareStatus("Client link opened");
+      window.open(url, "_blank", "noreferrer");
+    } catch (error) {
+      setShareStatus(`Could not open client link: ${getPortalApiErrorMessage(error)}`);
     }
   }
 
   async function handleCopyVideoLink(project: PortalProject, video: PortalVideo): Promise<void> {
-    const url = createVideoShareUrl(project, video, window.location.origin);
+    try {
+      const url = await createReviewLink(project, video);
+      const passcodeLabel =
+        config.cloudSyncEnabled && sharePasscode.trim() ? " passcode-protected" : "";
 
-    setShareUrl(url);
-    setShareStatus("Video link ready");
+      await writeShareLinkToClipboard(
+        url,
+        config.cloudSyncEnabled
+          ? `Cloud${passcodeLabel} video link copied`
+          : isLocalShareOrigin
+            ? "Local-only video link copied"
+            : "Video link copied",
+        config.cloudSyncEnabled
+          ? `Cloud${passcodeLabel} video link ready`
+          : isLocalShareOrigin
+            ? "Local-only video link ready"
+            : "Video link ready",
+      );
+    } catch (error) {
+      setShareStatus(`Could not create video link: ${getPortalApiErrorMessage(error)}`);
+    }
+  }
+
+  async function handleOpenVideoLink(project: PortalProject, video: PortalVideo): Promise<void> {
+    try {
+      const url = await createReviewLink(project, video);
+
+      setShareUrl(url);
+      setShareStatus("Video link opened");
+      window.open(url, "_blank", "noreferrer");
+    } catch (error) {
+      setShareStatus(`Could not open video link: ${getPortalApiErrorMessage(error)}`);
+    }
+  }
+
+  async function handleImportLocalProjects(): Promise<void> {
+    const localData = loadPortalData();
+
+    if (localData.projects.length === 0) {
+      setBrowserHasLocalProjects(false);
+      setCloudMessage("No local projects found in this browser.");
+      return;
+    }
+
+    setCloudStatus("loading");
+    setCloudMessage("Importing local projects to Cloudflare D1.");
 
     try {
-      await navigator.clipboard?.writeText(url);
-    } catch {
-      setShareStatus("Video link ready");
+      const importedData = await portalApi.importLocalProjects(localData);
+
+      cloudReadyRef.current = true;
+      setData(importedData);
+      setSelectedProjectId(importedData.projects[0]?.id ?? null);
+      setBrowserHasLocalProjects(localData.projects.length > 0);
+      setCloudStatus("synced");
+      setCloudMessage("Local projects imported to cloud storage. Local data was left in this browser.");
+    } catch (error) {
+      setCloudStatus("error");
+      setCloudMessage(getPortalApiErrorMessage(error));
     }
   }
 
@@ -310,18 +560,20 @@ export function AdminPortal(): React.JSX.Element {
 
   function openEditVideo(video: PortalVideo): void {
     setEditVideoDraft(getDraftFromVideo(video));
+    setEditDurationTouched(false);
     setEditingVideoId(video.id);
   }
 
   function closeEditVideo(): void {
     setEditingVideoId(null);
     setEditVideoDraft(emptyVideoDraft);
+    setEditDurationTouched(false);
   }
 
   function handleSubmitEditVideo(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
 
-    if (!selectedProject || !editingVideoId) {
+    if (!selectedProject || !editingVideoId || !editingVideo) {
       return;
     }
 
@@ -329,7 +581,11 @@ export function AdminPortal(): React.JSX.Element {
       updateVideo(current, selectedProject.id, editingVideoId, {
         assetId: editVideoDraft.assetId,
         description: editVideoDraft.description,
-        durationSeconds: parseOptionalSeconds(editVideoDraft.durationSeconds),
+        durationSeconds: getEditDurationPatch(
+          editingVideo,
+          editVideoDraft,
+          editDurationTouched,
+        ),
         recommendedPlaybackSpeed: editVideoDraft.recommendedPlaybackSpeed,
         startTimeSeconds: parseOptionalSeconds(editVideoDraft.startTimeSeconds),
         thumbnailUrl: editVideoDraft.thumbnailUrl,
@@ -345,12 +601,22 @@ export function AdminPortal(): React.JSX.Element {
     }
 
     const remainingVideos = videos.filter((video) => video.id !== deleteVideo.id);
+    const deleteIndex = videos.findIndex((video) => video.id === deleteVideo.id);
+    const nextActiveVideoId =
+      remainingVideos[deleteIndex]?.id ?? remainingVideos[deleteIndex - 1]?.id ?? null;
 
     setData((current) => removeVideo(current, selectedProject.id, deleteVideo.id));
-    setActiveVideoId(
-      activeVideo?.id === deleteVideo.id ? remainingVideos[0]?.id ?? null : activeVideoId,
-    );
+    setActiveVideoId(activeVideo?.id === deleteVideo.id ? nextActiveVideoId : activeVideoId);
     setDeleteVideoId(null);
+  }
+
+  function handleRefreshVideoDuration(video: PortalVideo): void {
+    setActiveVideoId(video.id);
+    setShareStatus(`Duration refresh requested for ${video.title}`);
+    setDurationRefreshRequest({
+      nonce: Date.now(),
+      videoId: video.id,
+    });
   }
 
   function handlePreviewDuration(video: PortalVideo, durationSeconds: number): void {
@@ -380,6 +646,60 @@ export function AdminPortal(): React.JSX.Element {
               Organize existing Gumlet videos, set suggested speed, and send unlisted review links.
             </CardDescription>
           </CardHeader>
+
+          <CardContent className="space-y-3">
+            <div className="space-y-3 rounded-md border border-white/10 bg-black/10 p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="gap-2" variant="secondary">
+                  {config.cloudSyncEnabled ? (
+                    <Cloud className="size-4" />
+                  ) : (
+                    <CloudOff className="size-4" />
+                  )}
+                  {config.cloudSyncEnabled ? "Cloud sync" : "Local only"}
+                </Badge>
+                <Badge className="gap-2" variant="mutedOutline">
+                  <ShieldCheck className="size-4" />
+                  Admin access
+                </Badge>
+              </div>
+              <p className="leading-6 text-[color:var(--muted-foreground)]">
+                {config.cloudSyncEnabled
+                  ? `${cloudMessage} Cloudflare Access should restrict /admin to ${config.adminEmail}.`
+                  : "Local mode stores projects only in this browser. Cloudflare Access is configured outside this app when cloud sync is enabled."}
+              </p>
+              {config.cloudSyncEnabled ? (
+                <p className="text-xs leading-5 text-[color:var(--muted-foreground)]">
+                  Access login and logout are controlled by Cloudflare Access.
+                </p>
+              ) : null}
+            </div>
+
+            {config.cloudSyncEnabled && browserHasLocalProjects ? (
+              <Alert>
+                <AlertTitle>Local projects found</AlertTitle>
+                <AlertDescription className="space-y-3">
+                  <span className="block">{config.securityCopy.localImport}</span>
+                  <Button
+                    onClick={() => void handleImportLocalProjects()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <HardDriveUpload />
+                    Import local projects to cloud
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {config.cloudSyncEnabled && cloudStatus === "error" ? (
+              <Alert variant="destructive">
+                <AlertTitle>Cloud sync needs attention</AlertTitle>
+                <AlertDescription>{cloudMessage}</AlertDescription>
+              </Alert>
+            ) : null}
+          </CardContent>
 
           <CardContent>
             <form className="space-y-4" onSubmit={handleCreateProject}>
@@ -502,6 +822,21 @@ export function AdminPortal(): React.JSX.Element {
                         value={shareUrl}
                       />
                     </Field>
+                    <Field>
+                      <FieldLabel htmlFor="share-passcode">Optional share passcode</FieldLabel>
+                      <Input
+                        aria-label="Optional share passcode"
+                        disabled={!config.cloudSyncEnabled}
+                        id="share-passcode"
+                        onChange={(event) => setSharePasscode(event.target.value)}
+                        placeholder={
+                          config.cloudSyncEnabled ? "No passcode" : "Cloud sync only"
+                        }
+                        size="lg"
+                        type="password"
+                        value={sharePasscode}
+                      />
+                    </Field>
                     <Field className="md:col-span-2">
                       <FieldLabel htmlFor="selected-project-description">
                         Project description
@@ -531,15 +866,9 @@ export function AdminPortal(): React.JSX.Element {
                     Copy client link
                   </Button>
                   <Button
-                    nativeButton={false}
-                    render={
-                      <a
-                        href={shareUrl || createShareUrl(selectedProject, window.location.origin)}
-                        rel="noreferrer"
-                        target="_blank"
-                      />
-                    }
+                    onClick={() => void handleOpenShareLink(selectedProject)}
                     size="lg"
+                    type="button"
                     variant="outline"
                   >
                     <ExternalLink />
@@ -562,6 +891,25 @@ export function AdminPortal(): React.JSX.Element {
 
               <CardContent className="space-y-5">
                 <Separator />
+
+                {isLocalShareOrigin ? (
+                  <Alert variant="destructive">
+                    <AlertTitle>Local-only share links</AlertTitle>
+                    <AlertDescription>
+                      This is a local-only link. Deploy to Cloudflare Pages and set the public app
+                      URL before sending to clients.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
+                <Alert>
+                  <AlertTitle>Unlisted link security</AlertTitle>
+                  <AlertDescription>
+                    Anyone with this link can view the shared video page. Do not include sensitive
+                    information in titles, descriptions, or URL data unless Gumlet access is
+                    restricted.
+                  </AlertDescription>
+                </Alert>
 
                 {shareStatus ? (
                   <Badge className="gap-2 px-3 py-2 text-sm" variant="secondary">
@@ -690,6 +1038,7 @@ export function AdminPortal(): React.JSX.Element {
                     {activeVideo ? (
                       <div className="space-y-3">
                         <GumletPlayer
+                          ref={previewPlayerRef}
                           onDuration={(durationSeconds) =>
                             handlePreviewDuration(activeVideo, durationSeconds)
                           }
@@ -760,6 +1109,10 @@ export function AdminPortal(): React.JSX.Element {
                               <MoreHorizontal />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem onClick={() => handleRefreshVideoDuration(video)}>
+                                <RefreshCw />
+                                Refresh duration
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => openEditVideo(video)}>
                                 <Pencil />
                                 Edit video
@@ -795,19 +1148,9 @@ export function AdminPortal(): React.JSX.Element {
                             Copy video link
                           </Button>
                           <Button
-                            nativeButton={false}
-                            render={
-                              <a
-                                href={createVideoShareUrl(
-                                  selectedProject,
-                                  video,
-                                  window.location.origin,
-                                )}
-                                rel="noreferrer"
-                                target="_blank"
-                              />
-                            }
+                            onClick={() => void handleOpenVideoLink(selectedProject, video)}
                             size="lg"
+                            type="button"
                             variant="outline"
                           >
                             <ExternalLink />
@@ -933,12 +1276,13 @@ export function AdminPortal(): React.JSX.Element {
                 <Input
                   id="edit-duration-seconds"
                   inputMode="numeric"
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    setEditDurationTouched(true);
                     setEditVideoDraft((draft) => ({
                       ...draft,
                       durationSeconds: event.target.value,
-                    }))
-                  }
+                    }));
+                  }}
                   size="lg"
                   value={editVideoDraft.durationSeconds}
                 />

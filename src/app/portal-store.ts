@@ -22,7 +22,7 @@ type VideoDraft = {
   assetId: string;
   description?: string;
   directVideoUrl?: string;
-  durationSeconds?: number;
+  durationSeconds?: null | number;
   recommendedPlaybackSpeed: PlaybackSpeed;
   startTimeSeconds?: number;
   thumbnailUrl?: string;
@@ -132,7 +132,7 @@ export function addVideoToProject(
         createdAt,
         description: normalizeOptionalText(draft.description),
         directVideoUrl: normalizeOptionalText(draft.directVideoUrl) ?? parsedInput.directVideoUrl,
-        durationSeconds: draft.durationSeconds,
+        durationSeconds: draft.durationSeconds ?? undefined,
         id: createId("video"),
         orderIndex: project.videos.length,
         recommendedPlaybackSpeed: draft.recommendedPlaybackSpeed,
@@ -186,7 +186,9 @@ export function updateVideo(
                 : parsedInput?.directVideoUrl
               : normalizeOptionalText(patch.directVideoUrl),
           durationSeconds:
-            patch.durationSeconds === undefined ? video.durationSeconds : patch.durationSeconds,
+            patch.durationSeconds === undefined
+              ? video.durationSeconds
+              : patch.durationSeconds ?? undefined,
           recommendedPlaybackSpeed:
             patch.recommendedPlaybackSpeed ?? video.recommendedPlaybackSpeed,
           startTimeSeconds:
