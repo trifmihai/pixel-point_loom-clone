@@ -3,6 +3,6 @@ pages_build_output_dir = "dist"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "pixel-point-loom-clone"
-database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+database_name = "portal-prod"
+database_id = "f9830510-4fda-44df-8e2d-c8ec8aae7539"
 migrations_dir = "migrations"
