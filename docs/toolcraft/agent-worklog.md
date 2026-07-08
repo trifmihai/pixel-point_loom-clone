@@ -6,7 +6,7 @@ This file records product decisions and the evidence behind them.
 
 Mode: product
 
-The app is now a local-first Gumlet client video portal. It organizes existing Gumlet asset IDs, creates encoded client share links, embeds Gumlet videos, suggests initial playback speeds, and collects timestamped feedback locally.
+The app is now a local-first Gumlet client video portal. It organizes existing Gumlet videos, creates encoded project and single-video share links, embeds Gumlet videos, starts direct MP4 video pages at the selected speed, and collects timestamped feedback locally.
 
 ## Decision Trail
 
@@ -59,18 +59,35 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Skipped checks: Full performance suite skipped because this Tier 2 visual/component pass does not affect renderer workload or playback behavior.
 - Risks: The Toolcraft/shadcn-style theme is intentionally quiet and dark, so the visual difference is subtle even when the components are correctly applied.
 
+### Iteration 4 - Single-video share links
+
+- Request: Replace project-only client sharing with links to individual videos, make the selected speed the actual playback speed on the video page, and show a clickable overlay with time saved before playback.
+- Task type: Post-first-working product routing and behavior change.
+- User-visible result: Admins can copy/open a per-video link from each video card. The `/video/$slug?data=...` page renders only that video, shows a start overlay with watch-time and saved-time messaging, and applies the selected playback speed to native MP4 playback.
+- Source/reference checked: User screenshot and Gumlet link examples, existing portal store/utilities/routes, Gumlet iframe/MP4 URL formats from the supplied entries, Playwright browser failure output.
+- Reference inputs: User supplied Gumlet embed snippet, watch URL, thumbnail URL, direct `main.mp4` URL, and screenshot of the admin UI.
+- Docs/contracts read: `superpowers:brainstorming`, local `writing-plans`, `superpowers:test-driven-development`, `AGENTS.md`, `docs/toolcraft/workflow.md`.
+- Contract rules applied: Tier 2 verification for routing/control/product behavior, use Toolcraft UI components where available, add red tests before implementation, keep no-secrets local-first sharing model.
+- Decision: Add single-video encoded snapshots and a dedicated `/video/$slug` route. Parse Gumlet watch/embed/MP4 inputs so the easiest entry, the direct MP4 URL, both extracts the Gumlet asset ID and stores a native playback URL.
+- Alternatives rejected: Project-wide deep links because the user explicitly wants one video per client link; relying only on Gumlet iframe playback-rate messaging because exact speed control is not guaranteed from this app; adding a Gumlet API integration because the supplied MP4 URL solves the speed requirement without credentials.
+- State/output mapping: Admin video card calls `createVideoShareUrl(project, video, origin)`; the video route decodes `VideoShareSnapshot`; direct MP4 videos render a native `video` element with `playbackRate` set to `recommendedPlaybackSpeed`; iframe-only videos reload the Gumlet embed with autoplay and best-effort speed commands after the overlay click.
+- Files changed: `src/app/video-share-portal.tsx`, `src/routes/root.tsx`, `src/app/admin-portal.tsx`, `src/app/gumlet-player.tsx`, `src/app/portal-utils.ts`, `src/app/portal-store.ts`, `src/app/portal-types.ts`, focused unit/browser tests, `src/app/app-acceptance.ts`, `docs/superpowers/*`, `docs/toolcraft/agent-worklog.md`.
+- Verification: Red Playwright test first failed on missing `/video/$slug`; after implementation, focused Vitest/typecheck passed, `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` passed 3 tests, `npm.cmd run verify:quick` passed, and `npm.cmd run build` passed.
+- Skipped checks: Full browser performance skipped because this Tier 2 change adds routing and DOM controls but no custom renderer, canvas, animation, export, or heavy workload path.
+- Risks: Exact playback speed requires the direct Gumlet `main.mp4` URL stored in the video; watch/embed/asset-only entries still render through the Gumlet iframe and speed commands remain best effort.
+
 ## Decisions
 
 ### Renderer
 
-- Decision: Use ordinary React DOM UI plus Gumlet iframe embeds.
-- Reason: The product is an operational portal, not a generated visual canvas/export tool.
-- Evidence: `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, and `src/app/gumlet-player.tsx`.
+- Decision: Use ordinary React DOM UI plus Gumlet iframe embeds and native MP4 playback for single-video pages when a direct Gumlet MP4 URL is available.
+- Reason: The product is an operational portal, not a generated visual canvas/export tool; native video is the browser-controlled path that can enforce playback speed.
+- Evidence: `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, `src/app/video-share-portal.tsx`, and `src/app/gumlet-player.tsx`.
 
 ### Timeline
 
 - Decision: No Toolcraft timeline.
-- Reason: Playback transport belongs to Gumlet's native player controls.
+- Reason: Playback transport belongs to Gumlet or the browser-native video element; the portal only sets initial speed/start state.
 - Evidence: No timeline route or schema behavior is used by the portal.
 
 ### Layers
@@ -83,7 +100,7 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 
 - Decision: Use Toolcraft UI/shadcn-style primitives for visible portal controls and form chrome.
 - Reason: The generated app includes a shared component system and the portal should not hand-roll available controls.
-- Evidence: `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, and `src/app/portal-component-system.test.ts`.
+- Evidence: `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, `src/app/video-share-portal.tsx`, and `src/app/portal-component-system.test.ts`.
 
 ### Export
 
@@ -119,8 +136,12 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Run: `Invoke-WebRequest http://127.0.0.1:3002/.toolcraft/server-identity.json` returned this project root.
 - Run: live Playwright DOM probe on `http://127.0.0.1:3002/` found visible `data-slot` markers for `card`, `button`, `input`, `textarea`, `field`, `field-label`, `badge`, and `empty`.
 - Run: `npm.cmd exec -- vitest run src/app/portal-component-system.test.ts` failed on arbitrary Card background overrides, then passed after Card surface cleanup.
+- Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts -g "video page"` passed after adding `/video/$slug` and native speed handling.
+- Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` passed 3 browser tests after adding per-video links.
+- Run: `npm.cmd run verify:quick` passed after the single-video share-link implementation.
+- Run: `npm.cmd run build` passed after the single-video share-link implementation.
 
 ## Risks
 
 - Risk: Without a backend, copied links contain a project snapshot and client feedback does not sync back to the admin automatically.
-- Risk: Recommended playback speed is sent to the iframe with safe postMessage attempts after load; exact behavior depends on Gumlet iframe API support.
+- Risk: Recommended playback speed is exact only for direct MP4 video pages; iframe-only links still use safe postMessage attempts after load and exact behavior depends on Gumlet iframe API support.

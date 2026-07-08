@@ -1,6 +1,7 @@
 import { Outlet, createRootRoute, createRoute } from "@tanstack/react-router";
 
 import { SharePortal } from "../app/share-portal";
+import { VideoSharePortal } from "../app/video-share-portal";
 import { AppHome } from "./index";
 
 function RootLayout(): React.JSX.Element {
@@ -26,6 +27,15 @@ const shareRoute = createRoute({
   }),
 });
 
+const videoRoute = createRoute({
+  component: VideoRoute,
+  getParentRoute: () => rootRoute,
+  path: "/video/$slug",
+  validateSearch: (search: Record<string, unknown>) => ({
+    data: typeof search.data === "string" ? search.data : undefined,
+  }),
+});
+
 function ShareRoute(): React.JSX.Element {
   const { slug } = shareRoute.useParams();
   const { data } = shareRoute.useSearch();
@@ -33,4 +43,11 @@ function ShareRoute(): React.JSX.Element {
   return <SharePortal encodedData={data} slug={slug} />;
 }
 
-export const routeTree = rootRoute.addChildren([indexRoute, shareRoute]);
+function VideoRoute(): React.JSX.Element {
+  const { slug } = videoRoute.useParams();
+  const { data } = videoRoute.useSearch();
+
+  return <VideoSharePortal encodedData={data} slug={slug} />;
+}
+
+export const routeTree = rootRoute.addChildren([indexRoute, shareRoute, videoRoute]);

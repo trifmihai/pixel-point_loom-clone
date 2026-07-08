@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const portalFiles = ["admin-portal.tsx", "share-portal.tsx"] as const;
+const portalFiles = ["admin-portal.tsx", "share-portal.tsx", "video-share-portal.tsx"] as const;
 
 function readPortalFile(fileName: (typeof portalFiles)[number]): string {
   return readFileSync(resolve(process.cwd(), "src/app", fileName), "utf8");

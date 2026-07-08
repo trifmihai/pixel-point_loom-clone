@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import type { PortalProject } from "./portal-types";
 import {
   buildGumletEmbedUrl,
+  createVideoShareUrl,
   createShareSlug,
+  decodeShareVideoSnapshot,
   decodeShareProject,
   encodeShareProject,
   estimateTimeSavedSeconds,
   estimateWatchTimeSeconds,
   formatDuration,
+  parseGumletInput,
 } from "./portal-utils";
 
 const projectFixture: PortalProject = {
@@ -55,10 +58,10 @@ describe("portal utilities", () => {
 
   it("builds Gumlet iframe URLs with optional start time", () => {
     expect(buildGumletEmbedUrl(" asset/with space ", 0)).toBe(
-      "https://play.gumlet.io/embed/asset%2Fwith%20space",
+      "https://play.gumlet.io/embed/asset%2Fwith%20space?background=false&autoplay=false&loop=false&disable_player_controls=false",
     );
     expect(buildGumletEmbedUrl("64fabc123", 42)).toBe(
-      "https://play.gumlet.io/embed/64fabc123?t=42",
+      "https://play.gumlet.io/embed/64fabc123?background=false&autoplay=false&loop=false&disable_player_controls=false&t=42",
     );
   });
 
@@ -79,5 +82,50 @@ describe("portal utilities", () => {
   it("rejects invalid share snapshots without throwing", () => {
     expect(decodeShareProject("not-json")).toBeNull();
     expect(decodeShareProject("")).toBeNull();
+  });
+
+  it("parses Gumlet IDs, watch links, embed snippets, and MP4 URLs", () => {
+    expect(parseGumletInput("6707bf60f0a80d006151c369")).toEqual({
+      assetId: "6707bf60f0a80d006151c369",
+      directVideoUrl: undefined,
+    });
+    expect(parseGumletInput("https://gumlet.tv/watch/6707bf60f0a80d006151c369")).toEqual({
+      assetId: "6707bf60f0a80d006151c369",
+      directVideoUrl: undefined,
+    });
+    expect(
+      parseGumletInput(
+        '<iframe src="https://play.gumlet.io/embed/6707bf60f0a80d006151c369?autoplay=false"></iframe>',
+      ),
+    ).toEqual({
+      assetId: "6707bf60f0a80d006151c369",
+      directVideoUrl: undefined,
+    });
+    expect(
+      parseGumletInput(
+        "https://video.gumlet.io/655d712a774b17ed87ac87e2/6707bf60f0a80d006151c369/main.mp4",
+      ),
+    ).toEqual({
+      assetId: "6707bf60f0a80d006151c369",
+      directVideoUrl:
+        "https://video.gumlet.io/655d712a774b17ed87ac87e2/6707bf60f0a80d006151c369/main.mp4",
+    });
+  });
+
+  it("creates and decodes single-video share URLs", () => {
+    const url = createVideoShareUrl(projectFixture, projectFixture.videos[0]!, "https://app.test");
+    const parsed = new URL(url);
+    const decoded = decodeShareVideoSnapshot(parsed.searchParams.get("data") ?? "");
+
+    expect(parsed.pathname).toMatch(/^\/video\/hero-review-/);
+    expect(decoded).toEqual({
+      project: {
+        clientName: "Acme",
+        id: "project_1",
+        name: "Website walkthrough",
+        shareSlug: "website-walkthrough-abc123",
+      },
+      video: projectFixture.videos[0],
+    });
   });
 });

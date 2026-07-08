@@ -1,4 +1,4 @@
-import { createShareSlug } from "./portal-utils";
+import { createShareSlug, parseGumletInput } from "./portal-utils";
 import type {
   PlaybackSpeed,
   PortalData,
@@ -21,6 +21,7 @@ type ProjectDraft = {
 type VideoDraft = {
   assetId: string;
   description?: string;
+  directVideoUrl?: string;
   durationSeconds?: number;
   recommendedPlaybackSpeed: PlaybackSpeed;
   startTimeSeconds?: number;
@@ -125,10 +126,12 @@ export function addVideoToProject(
         return project;
       }
 
+      const parsedInput = parseGumletInput(draft.assetId);
       const video: PortalVideo = {
-        assetId: draft.assetId.trim(),
+        ...parsedInput,
         createdAt,
         description: normalizeOptionalText(draft.description),
+        directVideoUrl: normalizeOptionalText(draft.directVideoUrl) ?? parsedInput.directVideoUrl,
         durationSeconds: draft.durationSeconds,
         id: createId("video"),
         orderIndex: project.videos.length,
@@ -163,13 +166,25 @@ export function updateVideo(
           return video;
         }
 
+        const parsedInput = patch.assetId === undefined ? null : parseGumletInput(patch.assetId);
+
         return {
           ...video,
-          assetId: patch.assetId === undefined ? video.assetId : patch.assetId.trim(),
+          ...(patch.assetId === undefined
+            ? {}
+            : {
+                ...parsedInput,
+              }),
           description:
             patch.description === undefined
               ? video.description
               : normalizeOptionalText(patch.description),
+          directVideoUrl:
+            patch.directVideoUrl === undefined
+              ? patch.assetId === undefined
+                ? video.directVideoUrl
+                : parsedInput?.directVideoUrl
+              : normalizeOptionalText(patch.directVideoUrl),
           durationSeconds:
             patch.durationSeconds === undefined ? video.durationSeconds : patch.durationSeconds,
           recommendedPlaybackSpeed:

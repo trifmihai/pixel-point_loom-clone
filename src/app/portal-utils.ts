@@ -1,4 +1,4 @@
-import type { PortalProject } from "./portal-types";
+import type { PortalProject, PortalVideo, VideoShareSnapshot } from "./portal-types";
 
 const gumletEmbedBaseUrl = "https://play.gumlet.io/embed";
 
@@ -55,10 +55,28 @@ export function estimateTimeSavedSeconds(
   return Math.max(0, Math.round(durationSeconds - watchTime));
 }
 
-export function buildGumletEmbedUrl(assetId: string, startTimeSeconds?: number): string {
+type GumletEmbedOptions = {
+  autoplay?: boolean;
+};
+
+export type ParsedGumletInput = {
+  assetId: string;
+  directVideoUrl?: string;
+};
+
+export function buildGumletEmbedUrl(
+  assetId: string,
+  startTimeSeconds?: number,
+  options: GumletEmbedOptions = {},
+): string {
   const encodedAssetId = encodeURIComponent(assetId.trim());
   const url = new URL(`${gumletEmbedBaseUrl}/${encodedAssetId}`);
   const startTime = clampSeconds(startTimeSeconds ?? 0);
+
+  url.searchParams.set("background", "false");
+  url.searchParams.set("autoplay", options.autoplay ? "true" : "false");
+  url.searchParams.set("loop", "false");
+  url.searchParams.set("disable_player_controls", "false");
 
   if (startTime > 0) {
     url.searchParams.set("t", String(startTime));
@@ -109,6 +127,44 @@ export function createShareUrl(project: PortalProject, origin: string): string {
   return url.toString();
 }
 
+function getVideoShareProject(project: PortalProject): VideoShareSnapshot["project"] {
+  return {
+    clientName: project.clientName,
+    id: project.id,
+    name: project.name,
+    shareSlug: project.shareSlug,
+  };
+}
+
+function createVideoShareSlug(video: PortalVideo, seed: string): string {
+  const base = slugify(video.title) || "video";
+  const suffix = slugify(seed).replace(/-/g, "").slice(-8) || Math.random().toString(36).slice(2, 8);
+
+  return `${base}-${suffix}`;
+}
+
+export function encodeShareVideoSnapshot(snapshot: VideoShareSnapshot): string {
+  return toBase64Url(JSON.stringify(snapshot));
+}
+
+export function createVideoShareUrl(
+  project: PortalProject,
+  video: PortalVideo,
+  origin: string,
+): string {
+  const url = new URL(`/video/${createVideoShareSlug(video, video.id)}`, origin);
+
+  url.searchParams.set(
+    "data",
+    encodeShareVideoSnapshot({
+      project: getVideoShareProject(project),
+      video,
+    }),
+  );
+
+  return url.toString();
+}
+
 export function decodeShareProject(value: string): PortalProject | null {
   if (!value.trim()) {
     return null;
@@ -130,4 +186,82 @@ export function decodeShareProject(value: string): PortalProject | null {
   } catch {
     return null;
   }
+}
+
+export function decodeShareVideoSnapshot(value: string): VideoShareSnapshot | null {
+  if (!value.trim()) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(fromBase64Url(value)) as Partial<VideoShareSnapshot>;
+
+    if (
+      !parsed.project ||
+      !parsed.video ||
+      typeof parsed.project.id !== "string" ||
+      typeof parsed.project.name !== "string" ||
+      typeof parsed.project.shareSlug !== "string" ||
+      typeof parsed.video.id !== "string" ||
+      typeof parsed.video.assetId !== "string" ||
+      typeof parsed.video.title !== "string"
+    ) {
+      return null;
+    }
+
+    return parsed as VideoShareSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function extractFirstUrl(value: string): string | null {
+  return value.match(/https?:\/\/[^\s"'<>]+/)?.[0] ?? null;
+}
+
+function getAssetIdFromUrl(url: URL): string | null {
+  const pathParts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+
+  if (url.hostname === "gumlet.tv" && pathParts[0] === "watch" && pathParts[1]) {
+    return pathParts[1];
+  }
+
+  if (url.hostname === "play.gumlet.io" && pathParts[0] === "embed" && pathParts[1]) {
+    return pathParts[1];
+  }
+
+  if (url.hostname === "video.gumlet.io" && pathParts.length >= 3) {
+    return pathParts[1] ?? null;
+  }
+
+  return null;
+}
+
+export function parseGumletInput(value: string): ParsedGumletInput {
+  const trimmed = value.trim();
+  const urlCandidate = extractFirstUrl(trimmed);
+
+  if (urlCandidate) {
+    try {
+      const url = new URL(urlCandidate);
+      const assetId = getAssetIdFromUrl(url) ?? trimmed;
+      const directVideoUrl =
+        url.hostname === "video.gumlet.io" && url.pathname.endsWith(".mp4")
+          ? url.toString()
+          : undefined;
+
+      return {
+        assetId,
+        directVideoUrl,
+      };
+    } catch {
+      return {
+        assetId: trimmed,
+      };
+    }
+  }
+
+  return {
+    assetId: trimmed,
+  };
 }

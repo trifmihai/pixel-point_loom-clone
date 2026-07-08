@@ -51,7 +51,7 @@ describe("portal store reducers", () => {
     const withProject = addProject(emptyData, { name: "Walkthrough" });
     const projectId = withProject.projects[0]!.id;
     const first = addVideoToProject(withProject, projectId, {
-      assetId: "asset-a",
+      assetId: "https://video.gumlet.io/workspace/asset-a/main.mp4",
       durationSeconds: 600,
       recommendedPlaybackSpeed: 1.5,
       title: "First",
@@ -69,6 +69,10 @@ describe("portal store reducers", () => {
     const reordered = moveVideo(edited, projectId, secondVideoId, "up");
 
     expect(edited.projects[0]?.videos[0]?.title).toBe("Intro");
+    expect(edited.projects[0]?.videos[0]).toMatchObject({
+      assetId: "asset-a",
+      directVideoUrl: "https://video.gumlet.io/workspace/asset-a/main.mp4",
+    });
     expect(reordered.projects[0]?.videos.map((video) => video.id)).toEqual([
       secondVideoId,
       firstVideoId,

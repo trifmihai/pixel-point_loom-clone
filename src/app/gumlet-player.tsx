@@ -4,6 +4,7 @@ import type { PortalVideo } from "./portal-types";
 import { buildGumletEmbedUrl } from "./portal-utils";
 
 type GumletPlayerProps = {
+  autoplay?: boolean;
   seekSeconds?: number;
   video: PortalVideo;
 };
@@ -28,10 +29,14 @@ function postPlaybackRateCommand(frame: HTMLIFrameElement, rate: number): void {
   }
 }
 
-export function GumletPlayer({ seekSeconds, video }: GumletPlayerProps): React.JSX.Element {
+export function GumletPlayer({
+  autoplay = false,
+  seekSeconds,
+  video,
+}: GumletPlayerProps): React.JSX.Element {
   const frameRef = React.useRef<HTMLIFrameElement | null>(null);
   const startTime = seekSeconds ?? video.startTimeSeconds ?? 0;
-  const embedUrl = buildGumletEmbedUrl(video.assetId, startTime);
+  const embedUrl = buildGumletEmbedUrl(video.assetId, startTime, { autoplay });
 
   const applyRecommendedSpeed = React.useCallback(() => {
     const frame = frameRef.current;

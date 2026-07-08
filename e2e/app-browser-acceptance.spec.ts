@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { PortalProject } from "../src/app/portal-types";
-import { encodeShareProject } from "../src/app/portal-utils";
+import { createVideoShareUrl, encodeShareProject } from "../src/app/portal-utils";
 
 const shareProjectFixture: PortalProject = {
   clientName: "Acme",
@@ -16,6 +16,7 @@ const shareProjectFixture: PortalProject = {
       assetId: "asset-share-1",
       createdAt: "2026-07-08T00:00:00.000Z",
       description: "Homepage polish notes.",
+      directVideoUrl: "https://video.gumlet.io/workspace/asset-share-1/main.mp4",
       durationSeconds: 720,
       id: "video_share_1",
       orderIndex: 0,
@@ -51,7 +52,7 @@ test("browser: share page opens an encoded project and records timestamped feedb
   ).toBeVisible();
   await expect(page.locator('iframe[title="Homepage walkthrough Gumlet video"]')).toHaveAttribute(
     "src",
-    /https:\/\/play\.gumlet\.io\/embed\/asset-share-1\?t=15/,
+    /https:\/\/play\.gumlet\.io\/embed\/asset-share-1\?background=false&autoplay=false&loop=false&disable_player_controls=false&t=15/,
   );
 
   await page.getByLabel("Your name").fill("Mira");
@@ -70,6 +71,36 @@ test("browser: share page opens an encoded project and records timestamped feedb
   await page.getByRole("button", { name: "Checkout notes" }).click();
   await expect(page.locator('iframe[title="Checkout notes Gumlet video"]')).toHaveAttribute(
     "src",
-    /https:\/\/play\.gumlet\.io\/embed\/asset-share-2/,
+    /https:\/\/play\.gumlet\.io\/embed\/asset-share-2\?background=false&autoplay=false&loop=false&disable_player_controls=false/,
   );
+});
+
+test("browser: video page starts one shared video at selected speed from the overlay", async ({
+  page,
+}) => {
+  const shareUrl = createVideoShareUrl(
+    shareProjectFixture,
+    shareProjectFixture.videos[0]!,
+    "http://127.0.0.1:3002",
+  );
+  const path = new URL(shareUrl).pathname + new URL(shareUrl).search;
+
+  await page.goto(path);
+
+  await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
+  await expect(page.getByText("Save about 4:00")).toBeVisible();
+  await expect(page.getByText("Watch in about 8:00")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start 1.5x review" })).toBeVisible();
+  await expect(page.locator("video")).toHaveAttribute(
+    "src",
+    "https://video.gumlet.io/workspace/asset-share-1/main.mp4",
+  );
+
+  await page.getByRole("button", { name: "Start 1.5x review" }).click();
+  await expect(page.getByText("Save about 4:00")).toBeHidden();
+  await expect
+    .poll(() =>
+      page.locator("video").evaluate((element) => (element as HTMLVideoElement).playbackRate),
+    )
+    .toBe(1.5);
 });

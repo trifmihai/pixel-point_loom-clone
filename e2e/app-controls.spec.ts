@@ -15,7 +15,9 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   await expect(page.getByRole("heading", { name: "Website walkthrough" })).toBeVisible();
   await expect(page.getByText("0 videos")).toBeVisible();
 
-  await page.getByLabel("Gumlet asset ID").fill("gumlet-asset-123");
+  await page
+    .getByLabel("Gumlet URL or asset ID")
+    .fill("https://video.gumlet.io/workspace/gumlet-asset-123/main.mp4");
   await page.getByLabel("Video title").fill("Hero review");
   await page.getByLabel("Video description").fill("Review the homepage hero changes.");
   await page.getByLabel("Duration in seconds").fill("720");
@@ -28,10 +30,14 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   await expect(page.getByText("12:00 video - Suggested 1.5x").first()).toBeVisible();
   await expect(page.locator('iframe[title="Hero review Gumlet video"]')).toHaveAttribute(
     "src",
-    /https:\/\/play\.gumlet\.io\/embed\/gumlet-asset-123\?t=30/,
+    /https:\/\/play\.gumlet\.io\/embed\/gumlet-asset-123\?background=false&autoplay=false&loop=false&disable_player_controls=false&t=30/,
   );
 
   await page.getByRole("button", { name: "Copy client link" }).click();
   await expect(page.getByLabel("Share URL")).toHaveValue(/\/share\/website-walkthrough-/);
   await expect(page.getByText("Share link ready")).toBeVisible();
+
+  await page.getByRole("button", { name: "Copy video link" }).click();
+  await expect(page.getByLabel("Share URL")).toHaveValue(/\/video\/hero-review-/);
+  await expect(page.getByText("Video link ready")).toBeVisible();
 });

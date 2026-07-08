@@ -6,6 +6,7 @@ export type PortalVideo = {
   assetId: string;
   createdAt: string;
   description?: string;
+  directVideoUrl?: string;
   durationSeconds?: number;
   id: string;
   orderIndex: number;
@@ -46,4 +47,14 @@ export type ViewingProgressStatus = "in-progress" | "not-started" | "watched";
 
 export type PortalData = {
   projects: PortalProject[];
+};
+
+export type VideoShareProject = Pick<
+  PortalProject,
+  "clientName" | "id" | "name" | "shareSlug"
+>;
+
+export type VideoShareSnapshot = {
+  project: VideoShareProject;
+  video: PortalVideo;
 };

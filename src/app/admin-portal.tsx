@@ -53,6 +53,7 @@ import {
 } from "./portal-store";
 import type { PlaybackSpeed, PortalData, PortalProject, PortalVideo } from "./portal-types";
 import {
+  createVideoShareUrl,
   createShareUrl,
   estimateTimeSavedSeconds,
   estimateWatchTimeSeconds,
@@ -244,6 +245,19 @@ export function AdminPortal(): React.JSX.Element {
       setShareStatus("Share link copied");
     } catch {
       setShareStatus("Share link ready");
+    }
+  }
+
+  async function handleCopyVideoLink(project: PortalProject, video: PortalVideo): Promise<void> {
+    const url = createVideoShareUrl(project, video, window.location.origin);
+
+    setShareUrl(url);
+    setShareStatus("Video link ready");
+
+    try {
+      await navigator.clipboard?.writeText(url);
+    } catch {
+      setShareStatus("Video link ready");
     }
   }
 
@@ -464,7 +478,7 @@ export function AdminPortal(): React.JSX.Element {
                   <CardHeader>
                     <CardTitle>Add Gumlet video</CardTitle>
                     <CardDescription>
-                      Paste an existing Gumlet asset ID and metadata for the client playlist.
+                      Paste an existing Gumlet asset ID, watch link, embed code, or MP4 URL.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -473,7 +487,7 @@ export function AdminPortal(): React.JSX.Element {
                       onSubmit={handleAddVideo}
                     >
                       <Field>
-                        <FieldLabel htmlFor="gumlet-asset-id">Gumlet asset ID</FieldLabel>
+                        <FieldLabel htmlFor="gumlet-asset-id">Gumlet URL or asset ID</FieldLabel>
                         <Input
                           id="gumlet-asset-id"
                           onChange={(event) =>
@@ -646,7 +660,7 @@ export function AdminPortal(): React.JSX.Element {
                             value={video.title}
                           />
                           <Input
-                            aria-label={`${video.title} asset ID`}
+                            aria-label={`${video.title} Gumlet URL or asset ID`}
                             onChange={(event) =>
                               setData((current) =>
                                 updateVideo(current, selectedProject.id, video.id, {
@@ -655,7 +669,7 @@ export function AdminPortal(): React.JSX.Element {
                               )
                             }
                             size="lg"
-                            value={video.assetId}
+                            value={video.directVideoUrl ?? video.assetId}
                           />
                           <div className="grid grid-cols-3 gap-2">
                             <Input
@@ -697,7 +711,35 @@ export function AdminPortal(): React.JSX.Element {
                             />
                           </div>
                         </CardContent>
-                        <CardContent className="flex gap-2">
+                        <CardContent className="flex flex-wrap gap-2">
+                          <Button
+                            onClick={() => void handleCopyVideoLink(selectedProject, video)}
+                            size="lg"
+                            type="button"
+                            variant="outline"
+                          >
+                            <Copy />
+                            Copy video link
+                          </Button>
+                          <Button
+                            nativeButton={false}
+                            render={
+                              <a
+                                href={createVideoShareUrl(
+                                  selectedProject,
+                                  video,
+                                  window.location.origin,
+                                )}
+                                rel="noreferrer"
+                                target="_blank"
+                              />
+                            }
+                            size="lg"
+                            variant="outline"
+                          >
+                            <ExternalLink />
+                            Open video link
+                          </Button>
                           <Button
                             aria-label={`Move ${video.title} up`}
                             disabled={index === 0}
