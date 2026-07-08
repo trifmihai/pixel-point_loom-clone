@@ -69,31 +69,39 @@ function loadVideoSnapshot(slug: string, encodedData?: string): VideoShareSnapsh
   return null;
 }
 
-function getWatchTimeLabel(video: PortalVideo): string | null {
-  const watchTime = estimateWatchTimeSeconds(
-    video.durationSeconds,
-    video.recommendedPlaybackSpeed,
-  );
+function getWatchTimeLabel(
+  durationSeconds: number | undefined,
+  playbackSpeed: number,
+): string | null {
+  const watchTime = estimateWatchTimeSeconds(durationSeconds, playbackSpeed);
 
   return watchTime ? `Watch in about ${formatDuration(watchTime)}` : null;
 }
 
-function getSavedTimeLabel(video: PortalVideo): string | null {
-  const savedTime = estimateTimeSavedSeconds(
-    video.durationSeconds,
-    video.recommendedPlaybackSpeed,
-  );
+function getSavedTimeLabel(
+  durationSeconds: number | undefined,
+  playbackSpeed: number,
+): string | null {
+  const savedTime = estimateTimeSavedSeconds(durationSeconds, playbackSpeed);
 
   return savedTime > 0 ? `Save about ${formatDuration(savedTime)}` : null;
 }
 
-function getDurationMeta(video: PortalVideo): string {
+function getDurationMeta(video: PortalVideo, durationSeconds: number | undefined): string {
   const pieces = [
-    video.durationSeconds ? `${formatDuration(video.durationSeconds)} video` : null,
+    durationSeconds ? `${formatDuration(durationSeconds)} video` : null,
     `${video.recommendedPlaybackSpeed}x playback`,
   ].filter(Boolean);
 
   return pieces.join(" - ");
+}
+
+function getRoundedMetadataDuration(player: HTMLVideoElement | null): number | undefined {
+  if (!player || !Number.isFinite(player.duration) || player.duration <= 0) {
+    return undefined;
+  }
+
+  return Math.round(player.duration);
 }
 
 export function VideoSharePortal({
@@ -104,20 +112,41 @@ export function VideoSharePortal({
     loadVideoSnapshot(slug, encodedData),
   );
   const [started, setStarted] = React.useState(false);
+  const [metadataDurationSeconds, setMetadataDurationSeconds] = React.useState<
+    number | undefined
+  >();
   const nativeVideoRef = React.useRef<HTMLVideoElement | null>(null);
   const video = snapshot?.video ?? null;
   const project = snapshot?.project ?? null;
-  const savedTimeLabel = video ? getSavedTimeLabel(video) : null;
-  const watchTimeLabel = video ? getWatchTimeLabel(video) : null;
+  const effectiveDurationSeconds = video?.durationSeconds ?? metadataDurationSeconds;
+  const watchTimeSeconds = video
+    ? estimateWatchTimeSeconds(effectiveDurationSeconds, video.recommendedPlaybackSpeed)
+    : undefined;
+  const savedTimeSeconds = video
+    ? estimateTimeSavedSeconds(effectiveDurationSeconds, video.recommendedPlaybackSpeed)
+    : 0;
+  const savedTimeLabel = video
+    ? getSavedTimeLabel(effectiveDurationSeconds, video.recommendedPlaybackSpeed)
+    : null;
+  const watchTimeLabel = video
+    ? getWatchTimeLabel(effectiveDurationSeconds, video.recommendedPlaybackSpeed)
+    : null;
 
-  const applyNativePlaybackSettings = React.useCallback(() => {
+  const applyNativePlaybackSettings = React.useCallback((options?: { audible?: boolean }) => {
     const player = nativeVideoRef.current;
 
     if (!player || !video) {
       return;
     }
 
+    player.defaultPlaybackRate = video.recommendedPlaybackSpeed;
     player.playbackRate = video.recommendedPlaybackSpeed;
+
+    if (options?.audible) {
+      player.defaultMuted = false;
+      player.muted = false;
+      player.volume = 1;
+    }
 
     if (video.startTimeSeconds && player.currentTime < video.startTimeSeconds) {
       try {
@@ -132,13 +161,27 @@ export function VideoSharePortal({
     applyNativePlaybackSettings();
   }, [applyNativePlaybackSettings]);
 
-  function handleStart(): void {
-    setStarted(true);
+  function handleNativeMetadata(): void {
     applyNativePlaybackSettings();
 
-    void nativeVideoRef.current?.play().catch(() => {
-      applyNativePlaybackSettings();
-    });
+    setMetadataDurationSeconds(
+      (current) => current ?? getRoundedMetadataDuration(nativeVideoRef.current),
+    );
+  }
+
+  function handleStart(): void {
+    const player = nativeVideoRef.current;
+
+    setStarted(true);
+    applyNativePlaybackSettings({ audible: true });
+
+    void player?.play().then(
+      () => applyNativePlaybackSettings({ audible: true }),
+      () => {
+        applyNativePlaybackSettings({ audible: true });
+        setStarted(false);
+      },
+    );
   }
 
   if (!video || !project) {
@@ -170,7 +213,7 @@ export function VideoSharePortal({
               {video.title}
             </CardTitle>
             <CardDescription className="text-sm leading-6">
-              {project.name} - {getDurationMeta(video)}
+              {project.name} - {getDurationMeta(video, effectiveDurationSeconds)}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -181,8 +224,10 @@ export function VideoSharePortal({
               ref={nativeVideoRef}
               className="aspect-video w-full bg-black"
               controls
-              onLoadedMetadata={applyNativePlaybackSettings}
+              onLoadedMetadata={handleNativeMetadata}
+              onPlay={() => applyNativePlaybackSettings({ audible: true })}
               poster={video.thumbnailUrl}
+              playsInline
               preload="metadata"
               src={video.directVideoUrl}
               title={`${video.title} video`}
@@ -213,7 +258,18 @@ export function VideoSharePortal({
                 <CardContent>
                   <Button className="w-full" onClick={handleStart} size="xl" type="button">
                     <Play />
-                    Start {video.recommendedPlaybackSpeed}x review
+                    <span className="flex min-w-0 flex-col items-start gap-1 text-left">
+                      <span>Start {video.recommendedPlaybackSpeed}x review</span>
+                      {effectiveDurationSeconds && watchTimeSeconds && savedTimeSeconds > 0 ? (
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium">
+                          <del className="text-white/70">
+                            {formatDuration(effectiveDurationSeconds)}
+                          </del>
+                          <span>{formatDuration(watchTimeSeconds)}</span>
+                          <span>Saves {formatDuration(savedTimeSeconds)}</span>
+                        </span>
+                      ) : null}
+                    </span>
                   </Button>
                 </CardContent>
               </Card>
@@ -224,7 +280,9 @@ export function VideoSharePortal({
         <Card>
           <CardHeader>
             <CardTitle className="text-xl">Review details</CardTitle>
-            <CardDescription className="text-sm">{getDurationMeta(video)}</CardDescription>
+            <CardDescription className="text-sm">
+              {getDurationMeta(video, effectiveDurationSeconds)}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm leading-6 text-[color:var(--muted-foreground)]">
             <Separator />

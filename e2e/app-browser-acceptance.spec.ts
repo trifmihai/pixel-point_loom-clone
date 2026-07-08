@@ -78,9 +78,39 @@ test("browser: share page opens an encoded project and records timestamped feedb
 test("browser: video page starts one shared video at selected speed from the overlay", async ({
   page,
 }) => {
+  await page.addInitScript(() => {
+    const playCalls: Array<{ muted: boolean; playbackRate: number; volume: number }> = [];
+
+    Object.defineProperty(window, "__portalPlayCalls", {
+      configurable: true,
+      value: playCalls,
+    });
+
+    Object.defineProperty(HTMLMediaElement.prototype, "duration", {
+      configurable: true,
+      get() {
+        return Number(this.dataset.mockDurationSeconds ?? "0");
+      },
+    });
+
+    HTMLMediaElement.prototype.play = function mockPlay() {
+      playCalls.push({
+        muted: this.muted,
+        playbackRate: this.playbackRate,
+        volume: this.volume,
+      });
+
+      return Promise.resolve();
+    };
+  });
+
+  const videoWithoutManualDuration = {
+    ...shareProjectFixture.videos[0]!,
+    durationSeconds: undefined,
+  };
   const shareUrl = createVideoShareUrl(
     shareProjectFixture,
-    shareProjectFixture.videos[0]!,
+    videoWithoutManualDuration,
     "http://127.0.0.1:3002",
   );
   const path = new URL(shareUrl).pathname + new URL(shareUrl).search;
@@ -88,19 +118,52 @@ test("browser: video page starts one shared video at selected speed from the ove
   await page.goto(path);
 
   await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
+  await page.locator("video").evaluate((element) => {
+    const video = element as HTMLVideoElement;
+
+    video.dataset.mockDurationSeconds = "720";
+    video.dispatchEvent(new Event("loadedmetadata"));
+  });
+
   await expect(page.getByText("Save about 4:00")).toBeVisible();
   await expect(page.getByText("Watch in about 8:00")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start 1.5x review" })).toBeVisible();
+  await expect(page.locator("del", { hasText: "12:00" })).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: /Start 1\.5x review.*12:00.*8:00.*Saves 4:00/,
+    }),
+  ).toBeVisible();
   await expect(page.locator("video")).toHaveAttribute(
     "src",
     "https://video.gumlet.io/workspace/asset-share-1/main.mp4",
   );
 
-  await page.getByRole("button", { name: "Start 1.5x review" }).click();
+  await page
+    .getByRole("button", {
+      name: /Start 1\.5x review.*12:00.*8:00.*Saves 4:00/,
+    })
+    .click();
   await expect(page.getByText("Save about 4:00")).toBeHidden();
   await expect
     .poll(() =>
       page.locator("video").evaluate((element) => (element as HTMLVideoElement).playbackRate),
     )
     .toBe(1.5);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const calls = (
+          window as typeof window & {
+            __portalPlayCalls?: Array<{ muted: boolean; playbackRate: number; volume: number }>;
+          }
+        ).__portalPlayCalls;
+
+        return calls?.at(-1);
+      }),
+    )
+    .toEqual({
+      muted: false,
+      playbackRate: 1.5,
+      volume: 1,
+    });
 });

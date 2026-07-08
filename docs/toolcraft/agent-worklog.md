@@ -76,6 +76,23 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Skipped checks: Full browser performance skipped because this Tier 2 change adds routing and DOM controls but no custom renderer, canvas, animation, export, or heavy workload path.
 - Risks: Exact playback speed requires the direct Gumlet `main.mp4` URL stored in the video; watch/embed/asset-only entries still render through the Gumlet iframe and speed commands remain best effort.
 
+### Iteration 5 - Audible speed start and inferred duration
+
+- Request: Make the video start unmuted at the shown speed when the overlay button is clicked, and show original duration, faster watch time, and time saved on the button based on the video length.
+- Task type: Post-first-working product playback bug fix and video-page copy behavior.
+- User-visible result: Direct MP4 video pages infer duration from native video metadata when no duration was typed, show the original duration with strikethrough, show the faster watch time plus saved time on the start button, and force unmuted 1x-volume playback at the selected speed before calling `play()`.
+- Source/reference checked: User screenshot, current `/video/$slug` implementation, Playwright regression failure, HTML native video metadata/playback behavior.
+- Reference inputs: User screenshot of the single-video page and the previously supplied Gumlet direct `main.mp4` URL pattern.
+- Docs/contracts read: `superpowers:systematic-debugging`, `superpowers:test-driven-development`, local `brainstorming`, local `writing-plans`, `AGENTS.md`, `docs/toolcraft/workflow.md`, `docs/toolcraft/assembly-workflow.md`, `docs/toolcraft/acceptance-testing.md`.
+- Contract rules applied: Root cause before fix, red browser test before implementation, Tier 2 verification for product behavior, preserve Toolcraft UI components and route-local portal model.
+- Decision: Use native `loadedmetadata` duration for direct MP4 videos as the duration source of truth when an admin has not entered duration manually, and apply `defaultPlaybackRate`, `playbackRate`, `muted = false`, `defaultMuted = false`, and `volume = 1` at the click handler before invoking `play()`.
+- Alternatives rejected: Estimating duration from the asset ID alone because the app has no Gumlet API credentials and iframe metadata is not exposed; relying on post-load playback-rate effects only because the user asked for the video to start at the shown speed.
+- State/output mapping: `loadedmetadata` writes `metadataDurationSeconds`; overlay labels derive original duration, accelerated watch time, and saved time from `metadataDurationSeconds ?? video.durationSeconds`; clicking the Toolcraft `Button` applies audible native media state and calls `HTMLVideoElement.play()`.
+- Files changed: `src/app/video-share-portal.tsx`, `e2e/app-browser-acceptance.spec.ts`, `docs/superpowers/plans/2026-07-08-video-playback-duration.md`, `docs/toolcraft/agent-worklog.md`.
+- Verification: Browser test failed first on missing `Save about 4:00` when duration was metadata-only, then passed after implementation; `npm.cmd run typecheck`, affected Playwright browser tests, `npm.cmd run verify:quick`, and `npm.cmd run build` passed.
+- Skipped checks: Full browser performance skipped because this is a DOM video-page behavior fix with no custom renderer or heavy workload change.
+- Risks: Metadata-derived duration is available only for native direct MP4 links. Asset/watch/embed-only entries still use the Gumlet iframe and cannot expose duration or guaranteed unmuted playback control to this client app.
+
 ## Decisions
 
 ### Renderer
@@ -140,8 +157,13 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` passed 3 browser tests after adding per-video links.
 - Run: `npm.cmd run verify:quick` passed after the single-video share-link implementation.
 - Run: `npm.cmd run build` passed after the single-video share-link implementation.
+- Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts -g "video page"` failed on missing metadata-derived saved-time copy, then passed after adding native metadata duration and audible play handling.
+- Run: `npm.cmd run typecheck` passed after adding native metadata duration and audible play handling.
+- Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` passed 3 browser tests after the audible start and inferred-duration fix.
+- Run: `npm.cmd run verify:quick` passed after the audible start and inferred-duration fix.
+- Run: `npm.cmd run build` passed after the audible start and inferred-duration fix.
 
 ## Risks
 
 - Risk: Without a backend, copied links contain a project snapshot and client feedback does not sync back to the admin automatically.
-- Risk: Recommended playback speed is exact only for direct MP4 video pages; iframe-only links still use safe postMessage attempts after load and exact behavior depends on Gumlet iframe API support.
+- Risk: Recommended playback speed and audible start are exact only for direct MP4 video pages; iframe-only links still use safe postMessage attempts after load and exact behavior depends on Gumlet iframe API support.
