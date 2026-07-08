@@ -1,0 +1,36 @@
+import { expect, test } from "@playwright/test";
+
+test("browser: admin creates a project, adds a Gumlet video, and exposes a share link", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
+
+  await page.getByLabel("Project name").fill("Website walkthrough");
+  await page.getByLabel("Client name").fill("Acme");
+  await page.getByLabel("Project description").fill("Design review videos");
+  await page.getByRole("button", { name: "Create project" }).click();
+
+  await expect(page.getByRole("heading", { name: "Website walkthrough" })).toBeVisible();
+  await expect(page.getByText("0 videos")).toBeVisible();
+
+  await page.getByLabel("Gumlet asset ID").fill("gumlet-asset-123");
+  await page.getByLabel("Video title").fill("Hero review");
+  await page.getByLabel("Video description").fill("Review the homepage hero changes.");
+  await page.getByLabel("Duration in seconds").fill("720");
+  await page.getByLabel("Start time in seconds").fill("30");
+  await page.getByLabel("Recommended speed").selectOption("1.5");
+  await page.getByRole("button", { name: "Add video" }).click();
+
+  await expect(page.getByRole("heading", { name: "Hero review" })).toBeVisible();
+  await expect(page.getByText("12:00 video · Suggested 1.5x").first()).toBeVisible();
+  await expect(page.locator('iframe[title="Hero review Gumlet video"]')).toHaveAttribute(
+    "src",
+    /https:\/\/play\.gumlet\.io\/embed\/gumlet-asset-123\?t=30/,
+  );
+
+  await page.getByRole("button", { name: "Copy client link" }).click();
+  await expect(page.getByLabel("Share URL")).toHaveValue(/\/share\/website-walkthrough-/);
+  await expect(page.getByText("Share link ready")).toBeVisible();
+});
