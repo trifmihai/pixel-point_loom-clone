@@ -40,4 +40,24 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   await page.getByRole("button", { name: "Copy video link" }).click();
   await expect(page.getByLabel("Share URL")).toHaveValue(/\/video\/hero-review-/);
   await expect(page.getByText("Video link ready")).toBeVisible();
+
+  await page.getByRole("button", { name: "Video actions for Hero review" }).click();
+  await page.getByRole("menuitem", { name: "Edit video" }).click();
+  await expect(page.getByRole("dialog", { name: "Edit video" })).toBeVisible();
+  await page.getByLabel("Edit video title").fill("Hero walkthrough");
+  await page.getByLabel("Edit default speed").click();
+  await page.getByRole("option", { name: "2x" }).click();
+  await page.getByRole("button", { name: "Save video" }).click();
+
+  await expect(page.getByRole("heading", { name: "Hero walkthrough" })).toBeVisible();
+  await expect(page.getByText("Suggested 2x").first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Video actions for Hero walkthrough" }).click();
+  await page.getByRole("menuitem", { name: "Delete video" }).click();
+  await expect(page.getByRole("alertdialog", { name: "Delete this video from the project?" })).toBeVisible();
+  await page.getByRole("button", { name: "Delete video" }).click();
+
+  await expect(page.getByText("0 videos")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Hero walkthrough" })).toBeHidden();
+  await expect(page.getByText("Add a Gumlet video to preview it here.")).toBeVisible();
 });

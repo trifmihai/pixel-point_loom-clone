@@ -55,6 +55,39 @@ export function estimateTimeSavedSeconds(
   return Math.max(0, Math.round(durationSeconds - watchTime));
 }
 
+export type PlaybackSavings = {
+  fasterSeconds: number;
+  originalSeconds: number;
+  savedSeconds: number;
+};
+
+export function calculatePlaybackSavings(
+  durationSeconds: number | undefined,
+  playbackSpeed: number,
+): PlaybackSavings | null {
+  const watchTime = estimateWatchTimeSeconds(durationSeconds, playbackSpeed);
+
+  if (!durationSeconds || !watchTime) {
+    return null;
+  }
+
+  return {
+    fasterSeconds: watchTime,
+    originalSeconds: Math.round(durationSeconds),
+    savedSeconds: estimateTimeSavedSeconds(durationSeconds, playbackSpeed),
+  };
+}
+
+export function formatSavedTime(durationSeconds: number): string {
+  const roundedSeconds = clampSeconds(durationSeconds);
+
+  if (roundedSeconds < 60) {
+    return `${roundedSeconds}s`;
+  }
+
+  return formatDuration(roundedSeconds);
+}
+
 type GumletEmbedOptions = {
   autoplay?: boolean;
 };

@@ -2,57 +2,121 @@ import * as React from "react";
 
 import type { PortalVideo } from "./portal-types";
 import { buildGumletEmbedUrl } from "./portal-utils";
+import {
+  buildGumletDurationCommands,
+  buildGumletSpeedCommands,
+  buildGumletStartCommands,
+  gumletPlayerOrigin,
+  parseGumletPlayerMessage,
+  postGumletCommands,
+} from "./gumlet-player-adapter";
 
 type GumletPlayerProps = {
   autoplay?: boolean;
+  onDuration?: (durationSeconds: number) => void;
   seekSeconds?: number;
   video: PortalVideo;
 };
 
-const gumletOrigin = "https://play.gumlet.io";
+export type GumletPlayerHandle = {
+  applyRecommendedSpeed: () => void;
+  requestDuration: () => void;
+  startReview: () => void;
+};
 
-function postPlaybackRateCommand(frame: HTMLIFrameElement, rate: number): void {
-  const target = frame.contentWindow;
+function useLatestValue<TValue>(value: TValue): React.RefObject<TValue> {
+  const ref = React.useRef(value);
 
-  if (!target) {
-    return;
-  }
+  React.useEffect(() => {
+    ref.current = value;
+  }, [value]);
 
-  const commands = [
-    { type: "setPlaybackRate", playbackRate: rate },
-    { event: "command", func: "setPlaybackRate", args: [rate] },
-    { method: "setPlaybackRate", value: rate },
-  ];
-
-  for (const command of commands) {
-    target.postMessage(command, gumletOrigin);
-  }
+  return ref;
 }
 
-export function GumletPlayer({
-  autoplay = false,
-  seekSeconds,
-  video,
-}: GumletPlayerProps): React.JSX.Element {
+export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerProps>(
+  function GumletPlayer(
+    { autoplay = false, onDuration, seekSeconds, video },
+    ref,
+  ): React.JSX.Element {
   const frameRef = React.useRef<HTMLIFrameElement | null>(null);
+  const onDurationRef = useLatestValue(onDuration);
   const startTime = seekSeconds ?? video.startTimeSeconds ?? 0;
   const embedUrl = buildGumletEmbedUrl(video.assetId, startTime, { autoplay });
 
   const applyRecommendedSpeed = React.useCallback(() => {
-    const frame = frameRef.current;
-
-    if (!frame) {
-      return;
-    }
-
-    postPlaybackRateCommand(frame, video.recommendedPlaybackSpeed);
+    postGumletCommands(frameRef.current, buildGumletSpeedCommands(video.recommendedPlaybackSpeed));
   }, [video.recommendedPlaybackSpeed]);
 
-  React.useEffect(() => {
-    const retry = window.setTimeout(applyRecommendedSpeed, 400);
+  const requestDuration = React.useCallback(() => {
+    postGumletCommands(frameRef.current, buildGumletDurationCommands());
+  }, []);
 
-    return () => window.clearTimeout(retry);
-  }, [applyRecommendedSpeed, embedUrl]);
+  const startReview = React.useCallback(() => {
+    postGumletCommands(frameRef.current, buildGumletStartCommands(video.recommendedPlaybackSpeed));
+
+    for (const delay of [250, 750, 1500]) {
+      window.setTimeout(() => {
+        postGumletCommands(frameRef.current, [
+          ...buildGumletSpeedCommands(video.recommendedPlaybackSpeed),
+          ...buildGumletDurationCommands(),
+        ]);
+      }, delay);
+    }
+  }, [video.recommendedPlaybackSpeed]);
+
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      applyRecommendedSpeed,
+      requestDuration,
+      startReview,
+    }),
+    [applyRecommendedSpeed, requestDuration, startReview],
+  );
+
+  React.useEffect(() => {
+    function handlePlayerMessage(event: MessageEvent): void {
+      if (event.origin && event.origin !== gumletPlayerOrigin) {
+        return;
+      }
+
+      const message = parseGumletPlayerMessage(event.data);
+
+      if (message.durationSeconds) {
+        onDurationRef.current?.(message.durationSeconds);
+      }
+    }
+
+    window.addEventListener("message", handlePlayerMessage);
+
+    return () => window.removeEventListener("message", handlePlayerMessage);
+  }, [onDurationRef]);
+
+  React.useEffect(() => {
+    const timeouts = [250, 750, 1500].map((delay) =>
+      window.setTimeout(() => {
+        applyRecommendedSpeed();
+        requestDuration();
+      }, delay),
+    );
+
+    return () => {
+      for (const timeout of timeouts) {
+        window.clearTimeout(timeout);
+      }
+    };
+  }, [applyRecommendedSpeed, embedUrl, requestDuration]);
+
+  React.useEffect(() => {
+    if (!autoplay) {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(startReview, 150);
+
+    return () => window.clearTimeout(timeout);
+  }, [autoplay, embedUrl, startReview]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-white/10 bg-black shadow-2xl shadow-black/30">
@@ -62,10 +126,15 @@ export function GumletPlayer({
         allowFullScreen
         className="aspect-video w-full"
         loading="lazy"
-        onLoad={applyRecommendedSpeed}
+        onLoad={() => {
+          applyRecommendedSpeed();
+          requestDuration();
+        }}
         src={embedUrl}
         title={`${video.title} Gumlet video`}
       />
     </div>
   );
-}
+});
+
+GumletPlayer.displayName = "GumletPlayer";

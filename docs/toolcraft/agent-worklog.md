@@ -93,6 +93,23 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Skipped checks: Full browser performance skipped because this is a DOM video-page behavior fix with no custom renderer or heavy workload change.
 - Risks: Metadata-derived duration is available only for native direct MP4 links. Asset/watch/embed-only entries still use the Gumlet iframe and cannot expose duration or guaranteed unmuted playback control to this client app.
 
+### Iteration 6 - Real Gumlet iframe playback flow
+
+- Request: Fix the user-facing Gumlet iframe video page, not only the native MP4 fallback; start the Gumlet player at the selected speed, request unmuted playback, show duration-derived time savings, and add edit/delete actions for project videos.
+- Task type: Post-first-working product playback bug fix and admin control refinement.
+- User-visible result: The `/video/$slug` Gumlet iframe path now requests player duration, shows a loading state until duration is known, updates the CTA to show original time, faster watch time, and saved time, and sends play/unmute/volume/speed commands when the CTA is clicked. Admin video cards now use a Toolcraft DropdownMenu for actions, a Dialog for editing, and an AlertDialog for delete confirmation.
+- Source/reference checked: User attachment, current Gumlet iframe implementation, single-video route, admin card UI, Toolcraft Dialog/DropdownMenu/AlertDialog components, browser failure output.
+- Reference inputs: User supplied Gumlet asset ID/embed/watch/MP4 examples and screenshots from the admin and video pages.
+- Docs/contracts read: `superpowers:systematic-debugging`, `superpowers:test-driven-development`, local `brainstorming`, local `writing-plans`, `AGENTS.md`, `docs/toolcraft/workflow.md`, `docs/toolcraft/component-rules.md`.
+- Contract rules applied: Root cause before fix, red unit/browser tests before implementation, use Toolcraft UI components for available controls, centralize Gumlet postMessage command shapes in a helper, and keep the local-first storage model.
+- Decision: Add a Gumlet iframe adapter that sends multiple common player command shapes for speed, play, unmute, volume, and duration requests; parse common player metadata message shapes; and persist detected duration back into local project video metadata when the matching video exists locally.
+- Alternatives rejected: Treating the iframe path as solved by the native MP4 fix because the visible client page uses the Gumlet iframe for asset/watch/embed entries; deleting Gumlet assets from the admin delete action because the app has no Gumlet API credentials and the requested action is project-local cleanup.
+- State/output mapping: `GumletPlayer` exposes an imperative start handle, posts adapter commands on load and CTA click, and reports duration messages upward. `VideoSharePortal` updates its encoded snapshot state and local project storage with resolved durations. `AdminPortal` edits videos through a Dialog and removes them through a confirmed project-local delete action.
+- Files changed: `src/app/gumlet-player-adapter.ts`, `src/app/gumlet-player.tsx`, `src/app/video-share-portal.tsx`, `src/app/admin-portal.tsx`, `src/app/portal-utils.ts`, focused unit/browser tests, and `docs/superpowers/plans/2026-07-08-real-gumlet-player-flow.md`.
+- Verification: Adapter/util tests failed first, then `npm.cmd exec -- vitest run src/app/gumlet-player-adapter.test.ts src/app/portal-utils.test.ts` passed 11 tests. Focused Playwright browser tests first failed on missing Gumlet duration/loading/actions, then printed 4 passing browser tests after implementation. `npm.cmd run build` passed. `npm.cmd run verify:quick` passed AI checks, docs/integrity checks, Node tests, and 28 Vitest tests.
+- Skipped checks: Full browser performance skipped because this Tier 2 fix changes DOM controls, iframe messaging, routing behavior, and local metadata, not renderer workload.
+- Risks: Gumlet and the browser can still block forced unmuted playback inside a cross-origin iframe. The app now makes the unmuted request from the user click and shows an explicit status, but the iframe's own sound control may still be required if Gumlet rejects the command.
+
 ## Decisions
 
 ### Renderer
@@ -162,8 +179,12 @@ The app is now a local-first Gumlet client video portal. It organizes existing G
 - Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` passed 3 browser tests after the audible start and inferred-duration fix.
 - Run: `npm.cmd run verify:quick` passed after the audible start and inferred-duration fix.
 - Run: `npm.cmd run build` passed after the audible start and inferred-duration fix.
+- Run: `npm.cmd exec -- vitest run src/app/gumlet-player-adapter.test.ts src/app/portal-utils.test.ts` first failed on missing Gumlet adapter/time-savings helpers, then passed 11 tests after implementation.
+- Run: `npm.cmd exec -- playwright test e2e/app-browser-acceptance.spec.ts e2e/app-controls.spec.ts` first failed on missing Gumlet iframe duration/action controls, then printed 4 passing browser tests after implementation; the Playwright runner process remained open in the tool backend after the pass output.
+- Run: `npm.cmd run build` passed after adding the Gumlet iframe adapter and admin edit/delete dialogs.
+- Run: `npm.cmd run verify:quick` passed after adding the Gumlet iframe adapter and admin edit/delete dialogs.
 
 ## Risks
 
 - Risk: Without a backend, copied links contain a project snapshot and client feedback does not sync back to the admin automatically.
-- Risk: Recommended playback speed and audible start are exact only for direct MP4 video pages; iframe-only links still use safe postMessage attempts after load and exact behavior depends on Gumlet iframe API support.
+- Risk: Recommended playback speed and audible start are exact for direct MP4 video pages. Iframe-only links now send play, speed, unmute, volume, and duration requests from the user click, but exact behavior still depends on Gumlet iframe API support and browser media policy.

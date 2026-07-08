@@ -5,11 +5,21 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  MoreHorizontal,
+  Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
 
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Badge,
   Button,
   Card,
@@ -18,6 +28,18 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -104,6 +126,18 @@ const playbackSpeedItems = playbackSpeedOptions.map((speed) => ({
   value: String(speed),
 }));
 
+function getDraftFromVideo(video: PortalVideo): VideoDraft {
+  return {
+    assetId: video.directVideoUrl ?? video.assetId,
+    description: video.description ?? "",
+    durationSeconds: video.durationSeconds ? String(video.durationSeconds) : "",
+    recommendedPlaybackSpeed: video.recommendedPlaybackSpeed,
+    startTimeSeconds: video.startTimeSeconds ? String(video.startTimeSeconds) : "",
+    thumbnailUrl: video.thumbnailUrl ?? "",
+    title: video.title,
+  };
+}
+
 function parseOptionalSeconds(value: string): number | undefined {
   const parsed = Number(value);
 
@@ -180,6 +214,9 @@ export function AdminPortal(): React.JSX.Element {
   );
   const [projectDraft, setProjectDraft] = React.useState<ProjectDraft>(emptyProjectDraft);
   const [videoDraft, setVideoDraft] = React.useState<VideoDraft>(emptyVideoDraft);
+  const [editVideoDraft, setEditVideoDraft] = React.useState<VideoDraft>(emptyVideoDraft);
+  const [editingVideoId, setEditingVideoId] = React.useState<string | null>(null);
+  const [deleteVideoId, setDeleteVideoId] = React.useState<string | null>(null);
   const [activeVideoId, setActiveVideoId] = React.useState<string | null>(null);
   const [shareUrl, setShareUrl] = React.useState("");
   const [shareStatus, setShareStatus] = React.useState("");
@@ -193,6 +230,8 @@ export function AdminPortal(): React.JSX.Element {
   const videos = selectedProject ? getSortedVideos(selectedProject) : [];
   const activeVideo =
     videos.find((video) => video.id === activeVideoId) ?? videos[0] ?? null;
+  const editingVideo = videos.find((video) => video.id === editingVideoId) ?? null;
+  const deleteVideo = videos.find((video) => video.id === deleteVideoId) ?? null;
 
   React.useEffect(() => {
     if (selectedProject && !selectedProjectId) {
@@ -267,6 +306,63 @@ export function AdminPortal(): React.JSX.Element {
     }
 
     setData((current) => updateProject(current, selectedProject.id, patch));
+  }
+
+  function openEditVideo(video: PortalVideo): void {
+    setEditVideoDraft(getDraftFromVideo(video));
+    setEditingVideoId(video.id);
+  }
+
+  function closeEditVideo(): void {
+    setEditingVideoId(null);
+    setEditVideoDraft(emptyVideoDraft);
+  }
+
+  function handleSubmitEditVideo(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+
+    if (!selectedProject || !editingVideoId) {
+      return;
+    }
+
+    setData((current) =>
+      updateVideo(current, selectedProject.id, editingVideoId, {
+        assetId: editVideoDraft.assetId,
+        description: editVideoDraft.description,
+        durationSeconds: parseOptionalSeconds(editVideoDraft.durationSeconds),
+        recommendedPlaybackSpeed: editVideoDraft.recommendedPlaybackSpeed,
+        startTimeSeconds: parseOptionalSeconds(editVideoDraft.startTimeSeconds),
+        thumbnailUrl: editVideoDraft.thumbnailUrl,
+        title: editVideoDraft.title,
+      }),
+    );
+    closeEditVideo();
+  }
+
+  function handleDeleteVideo(): void {
+    if (!selectedProject || !deleteVideo) {
+      return;
+    }
+
+    const remainingVideos = videos.filter((video) => video.id !== deleteVideo.id);
+
+    setData((current) => removeVideo(current, selectedProject.id, deleteVideo.id));
+    setActiveVideoId(
+      activeVideo?.id === deleteVideo.id ? remainingVideos[0]?.id ?? null : activeVideoId,
+    );
+    setDeleteVideoId(null);
+  }
+
+  function handlePreviewDuration(video: PortalVideo, durationSeconds: number): void {
+    if (!selectedProject || video.durationSeconds === durationSeconds) {
+      return;
+    }
+
+    setData((current) =>
+      updateVideo(current, selectedProject.id, video.id, {
+        durationSeconds,
+      }),
+    );
   }
 
   return (
@@ -593,12 +689,17 @@ export function AdminPortal(): React.JSX.Element {
                   <div className="min-w-0">
                     {activeVideo ? (
                       <div className="space-y-3">
-                        <GumletPlayer video={activeVideo} />
+                        <GumletPlayer
+                          onDuration={(durationSeconds) =>
+                            handlePreviewDuration(activeVideo, durationSeconds)
+                          }
+                          video={activeVideo}
+                        />
                         <Card>
                           <CardHeader>
-                          <CardTitle aria-level={2} className="text-2xl" role="heading">
-                            {activeVideo.title}
-                          </CardTitle>
+                            <CardTitle aria-level={2} className="text-2xl" role="heading">
+                              {activeVideo.title}
+                            </CardTitle>
                             <CardDescription className="text-sm">
                               {getVideoMeta(activeVideo)}
                             </CardDescription>
@@ -631,7 +732,7 @@ export function AdminPortal(): React.JSX.Element {
                         key={video.id}
                         size="sm"
                       >
-                        <CardHeader>
+                        <CardHeader className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
                           <Button
                             className="!h-auto w-full justify-start whitespace-normal px-0 py-0 text-left"
                             onClick={() => setActiveVideoId(video.id)}
@@ -645,73 +746,45 @@ export function AdminPortal(): React.JSX.Element {
                               </span>
                             </span>
                           </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  aria-label={`Video actions for ${video.title}`}
+                                  size="icon"
+                                  type="button"
+                                  variant="outline"
+                                />
+                              }
+                            >
+                              <MoreHorizontal />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem onClick={() => openEditVideo(video)}>
+                                <Pencil />
+                                Edit video
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => setDeleteVideoId(video.id)}
+                                variant="destructive"
+                              >
+                                <Trash2 />
+                                Delete video
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </CardHeader>
-                        <CardContent className="grid gap-2">
-                          <Input
-                            aria-label={`${video.title} title`}
-                            onChange={(event) =>
-                              setData((current) =>
-                                updateVideo(current, selectedProject.id, video.id, {
-                                  title: event.target.value,
-                                }),
-                              )
-                            }
-                            size="lg"
-                            value={video.title}
-                          />
-                          <Input
-                            aria-label={`${video.title} Gumlet URL or asset ID`}
-                            onChange={(event) =>
-                              setData((current) =>
-                                updateVideo(current, selectedProject.id, video.id, {
-                                  assetId: event.target.value,
-                                }),
-                              )
-                            }
-                            size="lg"
-                            value={video.directVideoUrl ?? video.assetId}
-                          />
-                          <div className="grid grid-cols-3 gap-2">
-                            <Input
-                              aria-label={`${video.title} duration`}
-                              inputMode="numeric"
-                              onChange={(event) =>
-                                setData((current) =>
-                                  updateVideo(current, selectedProject.id, video.id, {
-                                    durationSeconds: parseOptionalSeconds(event.target.value),
-                                  }),
-                                )
-                              }
-                              size="lg"
-                              value={video.durationSeconds ?? ""}
-                            />
-                            <Input
-                              aria-label={`${video.title} start time`}
-                              inputMode="numeric"
-                              onChange={(event) =>
-                                setData((current) =>
-                                  updateVideo(current, selectedProject.id, video.id, {
-                                    startTimeSeconds: parseOptionalSeconds(event.target.value),
-                                  }),
-                                )
-                              }
-                              size="lg"
-                              value={video.startTimeSeconds ?? ""}
-                            />
-                            <SpeedSelect
-                              ariaLabel={`${video.title} speed`}
-                              onValueChange={(recommendedPlaybackSpeed) =>
-                                setData((current) =>
-                                  updateVideo(current, selectedProject.id, video.id, {
-                                    recommendedPlaybackSpeed,
-                                  }),
-                                )
-                              }
-                              value={video.recommendedPlaybackSpeed}
-                            />
+                        <CardContent className="space-y-3">
+                          <div className="min-w-0 rounded-md border border-white/10 bg-black/10 px-3 py-2 text-xs leading-5 text-[color:var(--muted-foreground)]">
+                            <p className="truncate text-white">{video.assetId}</p>
+                            <p>
+                              {video.durationSeconds
+                                ? `${formatDuration(video.durationSeconds)} source length`
+                                : "Duration will be detected from Gumlet when available."}
+                            </p>
                           </div>
-                        </CardContent>
-                        <CardContent className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap gap-2">
                           <Button
                             onClick={() => void handleCopyVideoLink(selectedProject, video)}
                             size="lg"
@@ -768,20 +841,7 @@ export function AdminPortal(): React.JSX.Element {
                           >
                             <ArrowDown />
                           </Button>
-                          <Button
-                            className="ml-auto"
-                            onClick={() =>
-                              setData((current) =>
-                                removeVideo(current, selectedProject.id, video.id),
-                              )
-                            }
-                            size="lg"
-                            type="button"
-                            variant="destructive"
-                          >
-                            <Trash2 />
-                            Remove
-                          </Button>
+                          </div>
                         </CardContent>
                       </Card>
                     ))}
@@ -804,6 +864,153 @@ export function AdminPortal(): React.JSX.Element {
           )}
         </Card>
       </div>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            closeEditVideo();
+          }
+        }}
+        open={editingVideo !== null}
+      >
+        <DialogContent layout="sections" size="xl">
+          <DialogHeader>
+            <DialogTitle>Edit video</DialogTitle>
+            <DialogDescription>
+              Update the local review metadata. This does not change the Gumlet asset.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmitEditVideo}>
+            <DialogBody className="grid gap-3 md:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="edit-video-title">Edit video title</FieldLabel>
+                <Input
+                  id="edit-video-title"
+                  onChange={(event) =>
+                    setEditVideoDraft((draft) => ({ ...draft, title: event.target.value }))
+                  }
+                  required
+                  size="lg"
+                  value={editVideoDraft.title}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="edit-gumlet-asset-id">Edit Gumlet URL or asset ID</FieldLabel>
+                <Input
+                  id="edit-gumlet-asset-id"
+                  onChange={(event) =>
+                    setEditVideoDraft((draft) => ({ ...draft, assetId: event.target.value }))
+                  }
+                  required
+                  size="lg"
+                  value={editVideoDraft.assetId}
+                />
+              </Field>
+              <Field className="md:col-span-2">
+                <FieldLabel htmlFor="edit-video-description">Edit video description</FieldLabel>
+                <Textarea
+                  id="edit-video-description"
+                  onChange={(event) =>
+                    setEditVideoDraft((draft) => ({ ...draft, description: event.target.value }))
+                  }
+                  size="lg"
+                  value={editVideoDraft.description}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="edit-thumbnail-url">Edit thumbnail URL</FieldLabel>
+                <Input
+                  id="edit-thumbnail-url"
+                  onChange={(event) =>
+                    setEditVideoDraft((draft) => ({ ...draft, thumbnailUrl: event.target.value }))
+                  }
+                  size="lg"
+                  value={editVideoDraft.thumbnailUrl}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="edit-duration-seconds">Edit duration in seconds</FieldLabel>
+                <Input
+                  id="edit-duration-seconds"
+                  inputMode="numeric"
+                  onChange={(event) =>
+                    setEditVideoDraft((draft) => ({
+                      ...draft,
+                      durationSeconds: event.target.value,
+                    }))
+                  }
+                  size="lg"
+                  value={editVideoDraft.durationSeconds}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="edit-start-time-seconds">Edit start time in seconds</FieldLabel>
+                <Input
+                  id="edit-start-time-seconds"
+                  inputMode="numeric"
+                  onChange={(event) =>
+                    setEditVideoDraft((draft) => ({
+                      ...draft,
+                      startTimeSeconds: event.target.value,
+                    }))
+                  }
+                  size="lg"
+                  value={editVideoDraft.startTimeSeconds}
+                />
+              </Field>
+              <Field>
+                <FieldLabel>Edit default speed</FieldLabel>
+                <SpeedSelect
+                  ariaLabel="Edit default speed"
+                  onValueChange={(recommendedPlaybackSpeed) =>
+                    setEditVideoDraft((draft) => ({
+                      ...draft,
+                      recommendedPlaybackSpeed,
+                    }))
+                  }
+                  value={editVideoDraft.recommendedPlaybackSpeed}
+                />
+              </Field>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={closeEditVideo} type="button" variant="outline">
+                Cancel
+              </Button>
+              <Button type="submit">
+                <CheckCircle2 />
+                Save video
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteVideoId(null);
+          }
+        }}
+        open={deleteVideo !== null}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this video from the project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteVideo
+                ? `${deleteVideo.title} will be removed from this local review project only. The Gumlet asset will not be deleted.`
+                : "This video will be removed from this local review project only."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteVideo} type="button" variant="destructive">
+              <Trash2 />
+              Delete video
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

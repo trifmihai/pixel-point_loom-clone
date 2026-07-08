@@ -130,7 +130,7 @@ test("browser: video page starts one shared video at selected speed from the ove
   await expect(page.locator("del", { hasText: "12:00" })).toBeVisible();
   await expect(
     page.getByRole("button", {
-      name: /Start 1\.5x review.*12:00.*8:00.*Saves 4:00/,
+      name: /Start 1\.5x review.*12:00.*8:00.*saves 4:00/,
     }),
   ).toBeVisible();
   await expect(page.locator("video")).toHaveAttribute(
@@ -140,7 +140,7 @@ test("browser: video page starts one shared video at selected speed from the ove
 
   await page
     .getByRole("button", {
-      name: /Start 1\.5x review.*12:00.*8:00.*Saves 4:00/,
+      name: /Start 1\.5x review.*12:00.*8:00.*saves 4:00/,
     })
     .click();
   await expect(page.getByText("Save about 4:00")).toBeHidden();
@@ -166,4 +166,98 @@ test("browser: video page starts one shared video at selected speed from the ove
       playbackRate: 1.5,
       volume: 1,
     });
+});
+
+test("browser: Gumlet video page uses player metadata and sends review playback commands", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const commands: unknown[] = [];
+    const fakeContentWindow = {
+      postMessage(command: unknown) {
+        commands.push(command);
+      },
+    };
+
+    Object.defineProperty(window, "__gumletCommands", {
+      configurable: true,
+      value: commands,
+    });
+    Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
+      configurable: true,
+      get() {
+        return fakeContentWindow;
+      },
+    });
+  });
+
+  const gumletOnlyVideo = {
+    ...shareProjectFixture.videos[1]!,
+    durationSeconds: undefined,
+    recommendedPlaybackSpeed: 1.5 as const,
+  };
+  const shareUrl = createVideoShareUrl(
+    shareProjectFixture,
+    gumletOnlyVideo,
+    "http://127.0.0.1:3002",
+  );
+  const path = new URL(shareUrl).pathname + new URL(shareUrl).search;
+
+  await page.goto(path);
+  await expect(page.getByRole("heading", { name: "Checkout notes" })).toBeVisible();
+  await expect(page.getByText("Loading duration")).toBeVisible();
+
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { event: "durationchange", duration: 103 },
+        origin: "https://play.gumlet.io",
+      }),
+    );
+  });
+
+  await expect(page.locator("del", { hasText: "1:43" })).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: /Start 1\.5x review.*1:43.*1:09.*saves 34s/,
+    }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("button", {
+      name: /Start 1\.5x review.*1:43.*1:09.*saves 34s/,
+    })
+    .click();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const commands = (
+          window as typeof window & {
+            __gumletCommands?: Array<{ args?: unknown[]; func?: string; method?: string; type?: string }>;
+          }
+        ).__gumletCommands ?? [];
+
+        return {
+          play: commands.some(
+            (command) => command.func === "play" || command.method === "play" || command.type === "play",
+          ),
+          speed: commands.some(
+            (command) =>
+              (command.func === "setPlaybackRate" ||
+                command.method === "setPlaybackRate" ||
+                command.type === "setPlaybackRate") &&
+              JSON.stringify(command).includes("1.5"),
+          ),
+          unmute: commands.some(
+            (command) =>
+              command.func === "unMute" ||
+              command.method === "unMute" ||
+              command.type === "unmute" ||
+              JSON.stringify(command).includes('"muted":false'),
+          ),
+        };
+      }),
+    )
+    .toEqual({ play: true, speed: true, unmute: true });
 });

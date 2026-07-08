@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { PortalProject } from "./portal-types";
 import {
   buildGumletEmbedUrl,
+  calculatePlaybackSavings,
   createVideoShareUrl,
   createShareSlug,
   decodeShareVideoSnapshot,
@@ -11,6 +12,7 @@ import {
   estimateTimeSavedSeconds,
   estimateWatchTimeSeconds,
   formatDuration,
+  formatSavedTime,
   parseGumletInput,
 } from "./portal-utils";
 
@@ -54,6 +56,13 @@ describe("portal utilities", () => {
     expect(estimateTimeSavedSeconds(720, 1.5)).toBe(240);
     expect(estimateWatchTimeSeconds(undefined, 1.5)).toBeUndefined();
     expect(estimateTimeSavedSeconds(720, 0)).toBe(0);
+    expect(calculatePlaybackSavings(103, 1.5)).toEqual({
+      fasterSeconds: 69,
+      originalSeconds: 103,
+      savedSeconds: 34,
+    });
+    expect(formatSavedTime(34)).toBe("34s");
+    expect(formatSavedTime(240)).toBe("4:00");
   });
 
   it("builds Gumlet iframe URLs with optional start time", () => {
