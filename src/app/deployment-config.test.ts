@@ -4,7 +4,15 @@ import { describe, expect, it } from "vitest";
 
 describe("Cloudflare Pages static deployment config", () => {
   it("keeps direct SPA refreshes on share and video routes working", () => {
-    expect(readFileSync("public/_redirects", "utf8").trim()).toBe("/* /index.html 200");
+    const redirects = readFileSync("public/_redirects", "utf8");
+    const redirectLines = redirects
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    expect(redirects).toContain("/share/* /index.html 200");
+    expect(redirects).toContain("/video/* /index.html 200");
+    expect(redirectLines).not.toContain("/* /index.html 200");
   });
 
   it("sets static security headers without adding paid services", () => {
