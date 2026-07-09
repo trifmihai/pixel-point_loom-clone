@@ -8,6 +8,9 @@ VITE_ADMIN_EMAIL = "trifmihai.business@gmail.com"
 PUBLIC_APP_URL = "https://pixel-point-loom-clone.pages.dev"
 ADMIN_EMAIL = "trifmihai.business@gmail.com"
 
+[secrets]
+required = ["ADMIN_PASSWORD", "AUTH_SECRET"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "portal-prod"
