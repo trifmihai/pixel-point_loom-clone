@@ -8,6 +8,7 @@ import {
   Copy,
   ExternalLink,
   HardDriveUpload,
+  LogOut,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -223,6 +224,13 @@ function hasLocalProjects(): boolean {
   return loadPortalData().projects.length > 0;
 }
 
+function isProductionPagesHost(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.location.hostname === "pixel-point-loom-clone.pages.dev"
+  );
+}
+
 function SpeedSelect({ ariaLabel, onValueChange, value }: SpeedSelectProps): React.JSX.Element {
   const selected = playbackSpeedItems.find((item) => item.value === String(value));
 
@@ -280,6 +288,8 @@ export function AdminPortal(): React.JSX.Element {
   const cloudReadyRef = React.useRef(!config.cloudSyncEnabled);
   const cloudSaveTimeoutRef = React.useRef<number | null>(null);
   const previewPlayerRef = React.useRef<GumletPlayerHandle | null>(null);
+  const productionCloudSyncDisabled = isProductionPagesHost() && !config.cloudSyncEnabled;
+  const adminSessionExpected = config.cloudSyncEnabled || isProductionPagesHost();
 
   React.useEffect(() => {
     if (!config.cloudSyncEnabled) {
@@ -523,6 +533,14 @@ export function AdminPortal(): React.JSX.Element {
     }
   }
 
+  async function handleSignOut(): Promise<void> {
+    try {
+      await portalApi.logoutAdmin();
+    } finally {
+      window.location.assign("/admin");
+    }
+  }
+
   async function handleImportLocalProjects(): Promise<void> {
     const localData = loadPortalData();
 
@@ -662,18 +680,54 @@ export function AdminPortal(): React.JSX.Element {
                   <ShieldCheck className="size-4" />
                   Admin access
                 </Badge>
+                {adminSessionExpected ? (
+                  <Button
+                    className="ml-auto"
+                    onClick={() => void handleSignOut()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <LogOut />
+                    Sign out
+                  </Button>
+                ) : null}
               </div>
               <p className="leading-6 text-[color:var(--muted-foreground)]">
                 {config.cloudSyncEnabled
-                  ? `${cloudMessage} Cloudflare Access should restrict /admin to ${config.adminEmail}.`
-                  : "Local mode stores projects only in this browser. Cloudflare Access is configured outside this app when cloud sync is enabled."}
+                  ? `${cloudMessage} Admin APIs require the signed session cookie for ${config.adminEmail}.`
+                  : "Local mode stores projects only in this browser. Deployed admin APIs require the app login session."}
               </p>
-              {config.cloudSyncEnabled ? (
-                <p className="text-xs leading-5 text-[color:var(--muted-foreground)]">
-                  Access login and logout are controlled by Cloudflare Access.
-                </p>
-              ) : null}
+              <dl className="grid gap-2 text-xs sm:grid-cols-2">
+                <div className="rounded-md border border-white/10 bg-black/10 p-2">
+                  <dt className="text-[color:var(--muted-foreground)]">Cloud sync enabled</dt>
+                  <dd className="font-medium text-white">{config.cloudSyncEnabled ? "true" : "false"}</dd>
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/10 p-2">
+                  <dt className="text-[color:var(--muted-foreground)]">Local mode</dt>
+                  <dd className="font-medium text-white">{config.localMode ? "true" : "false"}</dd>
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/10 p-2 sm:col-span-2">
+                  <dt className="text-[color:var(--muted-foreground)]">Public app URL</dt>
+                  <dd className="break-all font-medium text-white">{config.publicAppUrl}</dd>
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/10 p-2 sm:col-span-2">
+                  <dt className="text-[color:var(--muted-foreground)]">Cloud sync status</dt>
+                  <dd className="font-medium text-white">
+                    {cloudStatus}: {cloudMessage}
+                  </dd>
+                </div>
+              </dl>
             </div>
+
+            {productionCloudSyncDisabled ? (
+              <Alert variant="destructive">
+                <AlertTitle>Production build warning</AlertTitle>
+                <AlertDescription>
+                  Cloud sync is disabled in this production build. Do not send ?data= links to clients.
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
             {config.cloudSyncEnabled && browserHasLocalProjects ? (
               <Alert>

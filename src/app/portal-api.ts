@@ -33,6 +33,11 @@ export type PublicShareResponse =
       snapshot: VideoShareSnapshot;
     };
 
+export type AdminSessionResponse = {
+  adminEmail: string;
+  authenticated: boolean;
+};
+
 type PortalApiErrorBody = {
   error?: {
     code?: string;
@@ -91,6 +96,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
 
   const response = await fetch(path, {
     ...init,
+    credentials: "same-origin",
     headers,
   });
 
@@ -118,6 +124,10 @@ export const portalApi = {
     return requestJson<PortalData>("/api/admin/projects");
   },
 
+  getAdminSession(): Promise<AdminSessionResponse> {
+    return requestJson<AdminSessionResponse>("/api/auth/session");
+  },
+
   getPublicShare(token: string): Promise<PublicShareResponse> {
     return requestJson<PublicShareResponse>(`/api/public/share/${encodeURIComponent(token)}`);
   },
@@ -125,6 +135,19 @@ export const portalApi = {
   importLocalProjects(data: PortalData): Promise<PortalData> {
     return requestJson<PortalData>("/api/admin/import", {
       body: JSON.stringify({ data }),
+      method: "POST",
+    });
+  },
+
+  loginAdmin(password: string): Promise<AdminSessionResponse> {
+    return requestJson<AdminSessionResponse>("/api/auth/login", {
+      body: JSON.stringify({ password }),
+      method: "POST",
+    });
+  },
+
+  logoutAdmin(): Promise<AdminSessionResponse> {
+    return requestJson<AdminSessionResponse>("/api/auth/logout", {
       method: "POST",
     });
   },

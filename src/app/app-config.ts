@@ -39,7 +39,7 @@ export function getAppConfig(currentOrigin = getCurrentOriginFallback()): AppCon
     publicAppUrl,
     securityCopy: {
       adminAccess:
-        "Admin APIs are intended to be protected by Cloudflare Access before the app route loads.",
+        "Admin APIs require the signed session cookie created by the app login.",
       cloudSync:
         "Cloud sync stores project metadata in Cloudflare D1. Gumlet remains the video host.",
       localImport:

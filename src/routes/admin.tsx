@@ -1,5 +1,6 @@
 import { ToolcraftApp } from "@/toolcraft/runtime/react";
 
+import { AdminAuthGate } from "../app/admin-auth-gate";
 import { AdminPortal } from "../app/admin-portal";
 import { appSchema } from "../app/app-schema";
 
@@ -9,7 +10,9 @@ export function AdminHome(): React.JSX.Element {
       <div hidden>
         <ToolcraftApp schema={appSchema} />
       </div>
-      <AdminPortal />
+      <AdminAuthGate>
+        <AdminPortal />
+      </AdminAuthGate>
     </>
   );
 }

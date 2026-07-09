@@ -8,10 +8,11 @@ share tokens, and passcode hashes. Videos remain hosted on Gumlet.
 
 - Central config: `src/app/app-config.ts` keeps app name, public URL, admin
   email, cloud/local mode flags, and short security/help copy in one place.
-- Protected dashboard concept: `/admin` should be protected by Cloudflare
-  Access, similar to a protected dashboard route, without adding NextAuth.
+- Protected dashboard concept: `/admin` uses a small app-level login backed by
+  Pages Functions and a signed HttpOnly cookie, without adding NextAuth or
+  Cloudflare Zero Trust.
 - Account/status UI: the admin panel shows Local only vs Cloud sync, admin
-  access status, and the Cloudflare Access login/logout note.
+  access status, and production cloud sync diagnostics.
 - API client pattern: `src/app/portal-api.ts` centralizes native `fetch` calls,
   API errors, and loading-state types.
 
@@ -55,23 +56,21 @@ Schema summary:
 `share_slug` is an app compatibility column for existing local projects and
 legacy fallback links.
 
-## Cloudflare Access
+## Admin App Login
 
-Protect the admin route at Cloudflare, not in client JavaScript:
+The admin route is protected inside the app, not by Cloudflare Access:
 
-1. In Cloudflare Zero Trust, create an Access application for the Pages domain.
-2. Set the protected path to `/admin*`.
-3. Allow only `trifmihai.business@gmail.com`.
-4. Leave public routes open:
+1. `/admin` shows the login screen when no valid admin session cookie exists.
+2. `/api/auth/login` checks `ADMIN_PASSWORD` server-side and sets a signed
+   HttpOnly, Secure, SameSite=Lax session cookie.
+3. `/api/auth/session` checks the signed cookie.
+4. `/api/auth/logout` clears the cookie.
+5. `/api/admin/*` accepts only requests with a valid signed admin session.
+6. Public routes stay open:
    - `/video/*`
    - `/share/*`
    - `/api/public/share/*`
    - `/api/health`
-5. Also protect `/api/admin/*` with the same Access policy if the Cloudflare
-   product routing UI requires API path rules separately from `/admin*`.
-6. Cloudflare Access must forward
-   `Cf-Access-Authenticated-User-Email`; admin APIs reject missing or
-   non-matching email headers.
 
 ## Environment Variables
 
@@ -86,6 +85,11 @@ Pages Functions:
 - `PUBLIC_APP_URL=https://pixel-point-loom-clone.pages.dev`
 - `ADMIN_EMAIL=trifmihai.business@gmail.com`
 - D1 binding: `DB`
+
+Manual Cloudflare Pages secrets:
+
+- `ADMIN_PASSWORD`: the password you will use on `/admin`.
+- `AUTH_SECRET`: a long random string used to sign the admin session cookie.
 
 Do not add Gumlet API keys to frontend code. This app only uses public Gumlet
 asset/embed/video URLs already provided by the admin.

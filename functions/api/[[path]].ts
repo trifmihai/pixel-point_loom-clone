@@ -7,6 +7,8 @@ import {
 
 type PagesEnv = {
   ADMIN_EMAIL?: string;
+  ADMIN_PASSWORD?: string;
+  AUTH_SECRET?: string;
   DB?: D1DatabaseLike;
   PUBLIC_APP_URL?: string;
   VITE_ADMIN_EMAIL?: string;
@@ -61,6 +63,8 @@ export async function onRequest(context: PagesContext): Promise<Response> {
 
   return handlePortalApiRequest(context.request, {
     adminEmail: context.env.ADMIN_EMAIL ?? context.env.VITE_ADMIN_EMAIL ?? defaultAdminEmail,
+    adminPassword: context.env.ADMIN_PASSWORD,
+    authSecret: context.env.AUTH_SECRET,
     db: context.env.DB ? createD1PortalDatabase(context.env.DB) : unavailableDatabase,
     publicAppUrl:
       context.env.PUBLIC_APP_URL ??

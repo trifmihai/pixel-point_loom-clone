@@ -8,6 +8,8 @@ import {
 import type { PortalData, PortalProject } from "./portal-types";
 
 const adminEmail = "trifmihai.business@gmail.com";
+const adminPassword = "correct-password";
+const authSecret = "test-auth-secret";
 
 function createProject(overrides: Partial<PortalProject> = {}): PortalProject {
   return {
@@ -46,22 +48,24 @@ function createRuntime(db = new MemoryPortalCloudDatabase()): PortalApiRuntime {
 
   return {
     adminEmail,
+    adminPassword,
+    authSecret,
     createToken: () => `token_${++tokenCount}`,
     db,
     now: () => new Date("2026-07-09T09:00:00.000Z"),
     publicAppUrl: "https://portal.example",
-  };
+  } as PortalApiRuntime;
 }
 
 function createRequest(path: string, init: RequestInit = {}): Request {
   return new Request(`https://portal.example${path}`, init);
 }
 
-function createAdminRequest(path: string, init: RequestInit = {}): Request {
+function createAdminRequest(path: string, sessionCookie: string, init: RequestInit = {}): Request {
   return createRequest(path, {
     ...init,
     headers: {
-      "Cf-Access-Authenticated-User-Email": adminEmail,
+      Cookie: sessionCookie,
       ...(init.headers ?? {}),
     },
   });
@@ -71,8 +75,24 @@ async function json<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function createAdminSessionCookie(runtime: PortalApiRuntime): Promise<string> {
+  const response = await handlePortalApiRequest(
+    createRequest("/api/auth/login", {
+      body: JSON.stringify({ password: adminPassword }),
+      method: "POST",
+    }),
+    runtime,
+  );
+  const setCookie = response.headers.get("Set-Cookie");
+
+  expect(response.status).toBe(200);
+  expect(setCookie).toContain("portal_admin_session=");
+
+  return setCookie!.split(";")[0]!;
+}
+
 describe("portal cloud API", () => {
-  it("serves public health without Cloudflare Access or D1 access", async () => {
+  it("serves public health without admin auth or D1 access", async () => {
     const throwingDb: MemoryPortalCloudDatabase = new Proxy(new MemoryPortalCloudDatabase(), {
       get() {
         throw new Error("D1 should not be touched by health checks");
@@ -89,39 +109,105 @@ describe("portal cloud API", () => {
     });
   });
 
-  it("rejects unauthenticated and non-admin admin API requests", async () => {
+  it("serves admin session state and rejects invalid admin API cookies", async () => {
     const runtime = createRuntime();
 
+    const session = await handlePortalApiRequest(createRequest("/api/auth/session"), runtime);
     const unauthenticated = await handlePortalApiRequest(
       createRequest("/api/admin/projects"),
       runtime,
     );
-    const nonAdmin = await handlePortalApiRequest(
+    const tampered = await handlePortalApiRequest(
       createRequest("/api/admin/projects", {
         headers: {
-          "Cf-Access-Authenticated-User-Email": "someone@example.com",
+          Cookie: "portal_admin_session=tampered.cookie",
         },
       }),
       runtime,
     );
 
+    expect(session.status).toBe(200);
+    await expect(json(session)).resolves.toEqual({
+      adminEmail,
+      authenticated: false,
+    });
     expect(unauthenticated.status).toBe(401);
-    expect(nonAdmin.status).toBe(403);
+    expect(tampered.status).toBe(401);
   });
 
-  it("allows only the configured admin and persists projects across sessions", async () => {
+  it("logs in with the admin password and clears the HttpOnly session cookie on logout", async () => {
     const runtime = createRuntime();
+
+    const wrongPassword = await handlePortalApiRequest(
+      createRequest("/api/auth/login", {
+        body: JSON.stringify({ password: "wrong-password" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const login = await handlePortalApiRequest(
+      createRequest("/api/auth/login", {
+        body: JSON.stringify({ password: adminPassword }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const setCookie = login.headers.get("Set-Cookie") ?? "";
+    const sessionCookie = setCookie.split(";")[0]!;
+    const session = await handlePortalApiRequest(
+      createRequest("/api/auth/session", {
+        headers: {
+          Cookie: sessionCookie,
+        },
+      }),
+      runtime,
+    );
+    const logout = await handlePortalApiRequest(
+      createRequest("/api/auth/logout", {
+        headers: {
+          Cookie: sessionCookie,
+        },
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    expect(wrongPassword.status).toBe(401);
+    expect(login.status).toBe(200);
+    await expect(json(login)).resolves.toEqual({
+      adminEmail,
+      authenticated: true,
+    });
+    expect(setCookie).toContain("portal_admin_session=");
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("Secure");
+    expect(setCookie).toContain("SameSite=Lax");
+    expect(setCookie).toContain("Path=/");
+    expect(setCookie).not.toContain(adminPassword);
+    expect(setCookie).not.toContain(authSecret);
+    expect(session.status).toBe(200);
+    await expect(json(session)).resolves.toEqual({
+      adminEmail,
+      authenticated: true,
+    });
+    expect(logout.status).toBe(200);
+    expect(logout.headers.get("Set-Cookie")).toContain("Max-Age=0");
+  });
+
+  it("allows a valid admin session to persist projects across sessions", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
     const data: PortalData = { projects: [createProject()] };
 
     const saveResponse = await handlePortalApiRequest(
-      createAdminRequest("/api/admin/projects", {
+      createAdminRequest("/api/admin/projects", sessionCookie, {
         body: JSON.stringify({ data }),
         method: "PUT",
       }),
       runtime,
     );
     const loadResponse = await handlePortalApiRequest(
-      createAdminRequest("/api/admin/projects"),
+      createAdminRequest("/api/admin/projects", sessionCookie),
       runtime,
     );
 
@@ -132,10 +218,11 @@ describe("portal cloud API", () => {
 
   it("imports local projects into cloud storage without deleting the browser source", async () => {
     const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
     const localData: PortalData = { projects: [createProject({ id: "project_local" })] };
 
     const response = await handlePortalApiRequest(
-      createAdminRequest("/api/admin/import", {
+      createAdminRequest("/api/admin/import", sessionCookie, {
         body: JSON.stringify({ data: localData }),
         method: "POST",
       }),
@@ -148,8 +235,9 @@ describe("portal cloud API", () => {
 
   it("creates token links instead of encoded-data URLs and scopes public video payloads", async () => {
     const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
     await handlePortalApiRequest(
-      createAdminRequest("/api/admin/projects", {
+      createAdminRequest("/api/admin/projects", sessionCookie, {
         body: JSON.stringify({ data: { projects: [createProject()] } }),
         method: "PUT",
       }),
@@ -157,7 +245,7 @@ describe("portal cloud API", () => {
     );
 
     const createLink = await handlePortalApiRequest(
-      createAdminRequest("/api/admin/share-links", {
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
         body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
         method: "POST",
       }),
@@ -183,8 +271,9 @@ describe("portal cloud API", () => {
 
   it("loads public project tokens without localStorage data", async () => {
     const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
     await handlePortalApiRequest(
-      createAdminRequest("/api/admin/projects", {
+      createAdminRequest("/api/admin/projects", sessionCookie, {
         body: JSON.stringify({ data: { projects: [createProject()] } }),
         method: "PUT",
       }),
@@ -192,7 +281,7 @@ describe("portal cloud API", () => {
     );
 
     const createLink = await handlePortalApiRequest(
-      createAdminRequest("/api/admin/share-links", {
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
         body: JSON.stringify({ projectId: "project_1" }),
         method: "POST",
       }),
@@ -214,22 +303,23 @@ describe("portal cloud API", () => {
   it("rejects revoked and expired public tokens", async () => {
     const db = new MemoryPortalCloudDatabase();
     const runtime = createRuntime(db);
+    const sessionCookie = await createAdminSessionCookie(runtime);
     await handlePortalApiRequest(
-      createAdminRequest("/api/admin/projects", {
+      createAdminRequest("/api/admin/projects", sessionCookie, {
         body: JSON.stringify({ data: { projects: [createProject()] } }),
         method: "PUT",
       }),
       runtime,
     );
     await handlePortalApiRequest(
-      createAdminRequest("/api/admin/share-links", {
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
         body: JSON.stringify({ projectId: "project_1" }),
         method: "POST",
       }),
       runtime,
     );
     await handlePortalApiRequest(
-      createAdminRequest("/api/admin/share-links", {
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
         body: JSON.stringify({
           expiresAt: "2026-07-09T08:30:00.000Z",
           projectId: "project_1",
@@ -256,15 +346,16 @@ describe("portal cloud API", () => {
 
   it("blocks passcode-protected tokens until the correct passcode is verified server-side", async () => {
     const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
     await handlePortalApiRequest(
-      createAdminRequest("/api/admin/projects", {
+      createAdminRequest("/api/admin/projects", sessionCookie, {
         body: JSON.stringify({ data: { projects: [createProject()] } }),
         method: "PUT",
       }),
       runtime,
     );
     const createLink = await handlePortalApiRequest(
-      createAdminRequest("/api/admin/share-links", {
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
         body: JSON.stringify({
           passcode: "client-pass",
           projectId: "project_1",

@@ -25,11 +25,11 @@ Skip: Full performance checkpoint is not required for this post-first-working no
    - Load tokenized public payloads without localStorage.
    - Show passcode gate before video/project details when required.
 7. Add tests for admin auth, D1-like cross-session persistence, import, token links, public token loads, revoked/expired links, passcode unlock, no secret leakage, and existing Gumlet behavior.
-8. Add docs covering borrowed ShipFast concepts, intentionally omitted ShipFast features, Cloudflare setup, D1 schema, Access setup, env vars, cost guardrails, security limits, and backup/export.
+8. Add docs covering borrowed ShipFast concepts, intentionally omitted ShipFast features, Cloudflare setup, D1 schema, app-level admin login, env vars, cost guardrails, security limits, and backup/export.
 
 ## Notes
 
 - Keep Vite React/TanStack routing.
 - Keep Toolcraft/shadcn-style components and existing Gumlet playback/duration logic.
 - Do not add paid SaaS dependencies or video storage/proxying.
-- Cloudflare Access protects `/admin`; public token routes remain open.
+- App-level signed-cookie login protects `/admin` and `/api/admin/*`; public token routes remain open.

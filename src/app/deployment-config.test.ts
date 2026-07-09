@@ -74,8 +74,42 @@ describe("Cloudflare Pages static deployment config", () => {
 
     expect(appConfig).toContain("appName");
     expect(appConfig).toContain("cloudSyncEnabled");
+    expect(appConfig).not.toContain("Cloudflare Access");
     expect(portalApi).toContain("fetch(");
     expect(frontendSource).not.toMatch(/gumlet[_-]?api|api[_-]?key|secret|token_secret/i);
     expect(frontendSource).not.toMatch(/axios|stripe|resend|mongoose|mongodb|daisyui/i);
+  });
+
+  it("uses free app-level admin authentication without frontend secrets", () => {
+    const apiFunction = readFileSync("functions/api/[[path]].ts", "utf8");
+    const adminRoute = readFileSync("src/routes/admin.tsx", "utf8");
+    const authGate = readFileSync("src/app/admin-auth-gate.tsx", "utf8");
+    const portalApi = readFileSync("src/app/portal-api.ts", "utf8");
+    const frontendSource = `${adminRoute}\n${authGate}\n${portalApi}`;
+
+    expect(apiFunction).toContain("ADMIN_PASSWORD");
+    expect(apiFunction).toContain("AUTH_SECRET");
+    expect(adminRoute).toContain("AdminAuthGate");
+    expect(authGate).toContain("portalApi.loginAdmin");
+    expect(authGate).toContain("getAdminSession");
+    expect(portalApi).toContain('credentials: "same-origin"');
+    expect(portalApi).toContain('"/api/auth/login"');
+    expect(portalApi).toContain('"/api/auth/logout"');
+    expect(portalApi).toContain('"/api/auth/session"');
+    expect(frontendSource).not.toContain("ADMIN_PASSWORD");
+    expect(frontendSource).not.toContain("AUTH_SECRET");
+    expect(frontendSource).not.toContain("localStorage");
+  });
+
+  it("shows production cloud sync diagnostics in the admin UI", () => {
+    const adminPortal = readFileSync("src/app/admin-portal.tsx", "utf8");
+
+    expect(adminPortal).toContain("Cloud sync enabled");
+    expect(adminPortal).toContain("Local mode");
+    expect(adminPortal).toContain("Public app URL");
+    expect(adminPortal).toContain("Cloud sync status");
+    expect(adminPortal).toContain(
+      "Cloud sync is disabled in this production build. Do not send ?data= links to clients.",
+    );
   });
 });

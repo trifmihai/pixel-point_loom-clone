@@ -38,6 +38,8 @@ export type PortalCloudDatabase = {
 
 export type PortalApiRuntime = {
   adminEmail: string;
+  adminPassword?: string;
+  authSecret?: string;
   createToken?: () => string;
   db: PortalCloudDatabase;
   now?: () => Date;
@@ -64,9 +66,18 @@ type PublicPayload =
       };
     };
 
+type AdminSessionPayload = {
+  email: string;
+  expiresAt: number;
+  issuedAt: number;
+  purpose: "portal-admin";
+};
+
 const publicRateLimits = new Map<string, { count: number; resetAt: number }>();
 const publicRateLimitWindowMs = 60_000;
 const publicRateLimitMaxRequests = 60;
+const adminSessionCookieName = "portal_admin_session";
+const adminSessionMaxAgeSeconds = 60 * 60 * 24 * 7;
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -104,26 +115,289 @@ function errorResponse(status: number, code: string, message: string): Response 
   );
 }
 
-function getAccessEmail(request: Request): string | null {
-  return request.headers.get("Cf-Access-Authenticated-User-Email");
-}
-
-function authorizeAdmin(request: Request, runtime: PortalApiRuntime): Response | string {
-  const accessEmail = getAccessEmail(request);
-
-  if (!accessEmail) {
+function getConfiguredAdminPassword(runtime: PortalApiRuntime): Response | string {
+  if (!runtime.adminPassword) {
     return errorResponse(
-      401,
-      "admin_auth_required",
-      "Cloudflare Access identity is required for admin APIs.",
+      500,
+      "auth_not_configured",
+      "Admin authentication is not configured.",
     );
   }
 
-  if (normalizeAdminEmail(accessEmail) !== normalizeAdminEmail(runtime.adminEmail)) {
-    return errorResponse(403, "admin_forbidden", "This account is not allowed to use admin APIs.");
+  return runtime.adminPassword;
+}
+
+function getConfiguredAuthSecret(runtime: PortalApiRuntime): Response | string {
+  const authSecret = runtime.authSecret?.trim();
+
+  if (!authSecret) {
+    return errorResponse(
+      500,
+      "auth_not_configured",
+      "Admin authentication is not configured.",
+    );
   }
 
-  return accessEmail;
+  return authSecret;
+}
+
+function encodeBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeBase64Url(value: string): Uint8Array {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
+function encodeJsonBase64Url(value: unknown): string {
+  return encodeBase64Url(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+function decodeJsonBase64Url<T>(value: string): T {
+  return JSON.parse(new TextDecoder().decode(decodeBase64Url(value))) as T;
+}
+
+async function signSessionValue(value: string, authSecret: string): Promise<string> {
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(authSecret),
+    {
+      hash: "SHA-256",
+      name: "HMAC",
+    },
+    false,
+    ["sign"],
+  );
+  const signature = await globalThis.crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(value),
+  );
+
+  return encodeBase64Url(new Uint8Array(signature));
+}
+
+function getCookie(request: Request, name: string): string | null {
+  const cookieHeader = request.headers.get("Cookie");
+
+  if (!cookieHeader) {
+    return null;
+  }
+
+  for (const cookie of cookieHeader.split(";")) {
+    const [rawName, ...rawValueParts] = cookie.trim().split("=");
+
+    if (rawName === name) {
+      return decodeURIComponent(rawValueParts.join("="));
+    }
+  }
+
+  return null;
+}
+
+function createSessionCookie(value: string, maxAgeSeconds: number): string {
+  return `${adminSessionCookieName}=${encodeURIComponent(
+    value,
+  )}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
+}
+
+function createExpiredSessionCookie(): string {
+  return createSessionCookie("", 0);
+}
+
+function coerceAdminSessionPayload(value: unknown): AdminSessionPayload | null {
+  const payload = value as Partial<AdminSessionPayload>;
+
+  if (
+    !payload ||
+    payload.purpose !== "portal-admin" ||
+    typeof payload.email !== "string" ||
+    typeof payload.expiresAt !== "number" ||
+    typeof payload.issuedAt !== "number" ||
+    !Number.isFinite(payload.expiresAt) ||
+    !Number.isFinite(payload.issuedAt)
+  ) {
+    return null;
+  }
+
+  return {
+    email: payload.email,
+    expiresAt: payload.expiresAt,
+    issuedAt: payload.issuedAt,
+    purpose: "portal-admin",
+  };
+}
+
+async function createSignedSessionCookie(runtime: PortalApiRuntime): Promise<Response | string> {
+  const authSecret = getConfiguredAuthSecret(runtime);
+
+  if (authSecret instanceof Response) {
+    return authSecret;
+  }
+
+  const now = runtime.now?.() ?? new Date();
+  const payload = encodeJsonBase64Url({
+    email: runtime.adminEmail,
+    expiresAt: now.getTime() + adminSessionMaxAgeSeconds * 1000,
+    issuedAt: now.getTime(),
+    purpose: "portal-admin",
+  } satisfies AdminSessionPayload);
+  const signature = await signSessionValue(payload, authSecret);
+
+  return createSessionCookie(`${payload}.${signature}`, adminSessionMaxAgeSeconds);
+}
+
+async function getAdminSession(
+  request: Request,
+  runtime: PortalApiRuntime,
+): Promise<AdminSessionPayload | Response | null> {
+  const cookie = getCookie(request, adminSessionCookieName);
+
+  if (!cookie) {
+    return null;
+  }
+
+  const [payloadPart, signaturePart, extraPart] = cookie.split(".");
+
+  if (!payloadPart || !signaturePart || extraPart) {
+    return null;
+  }
+
+  const authSecret = getConfiguredAuthSecret(runtime);
+
+  if (authSecret instanceof Response) {
+    return authSecret;
+  }
+
+  const expectedSignature = await signSessionValue(payloadPart, authSecret);
+
+  if (!constantTimeEqual(signaturePart, expectedSignature)) {
+    return null;
+  }
+
+  try {
+    const payload = coerceAdminSessionPayload(decodeJsonBase64Url<unknown>(payloadPart));
+    const now = runtime.now?.() ?? new Date();
+
+    if (
+      !payload ||
+      payload.expiresAt <= now.getTime() ||
+      normalizeAdminEmail(payload.email) !== normalizeAdminEmail(runtime.adminEmail)
+    ) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function adminSessionBody(runtime: PortalApiRuntime, authenticated: boolean) {
+  return {
+    adminEmail: runtime.adminEmail,
+    authenticated,
+  };
+}
+
+async function handleAuthRequest(
+  request: Request,
+  runtime: PortalApiRuntime,
+  pathParts: string[],
+): Promise<Response> {
+  if (pathParts.length !== 3) {
+    return errorResponse(404, "not_found", "Auth API route not found.");
+  }
+
+  if (pathParts[2] === "session") {
+    if (request.method !== "GET") {
+      return errorResponse(405, "method_not_allowed", "This session route only accepts GET.");
+    }
+
+    const session = await getAdminSession(request, runtime);
+
+    if (session instanceof Response) {
+      return session;
+    }
+
+    return jsonResponse(adminSessionBody(runtime, Boolean(session)));
+  }
+
+  if (pathParts[2] === "login") {
+    if (request.method !== "POST") {
+      return errorResponse(405, "method_not_allowed", "This login route only accepts POST.");
+    }
+
+    const configuredPassword = getConfiguredAdminPassword(runtime);
+
+    if (configuredPassword instanceof Response) {
+      return configuredPassword;
+    }
+
+    const body = await readJsonBody<{ password?: string }>(request);
+
+    if (
+      typeof body.password !== "string" ||
+      !constantTimeEqual(body.password, configuredPassword)
+    ) {
+      return errorResponse(401, "invalid_credentials", "The admin password is not correct.");
+    }
+
+    const sessionCookie = await createSignedSessionCookie(runtime);
+
+    if (sessionCookie instanceof Response) {
+      return sessionCookie;
+    }
+
+    return jsonResponse(adminSessionBody(runtime, true), {
+      headers: {
+        "Set-Cookie": sessionCookie,
+      },
+    });
+  }
+
+  if (pathParts[2] === "logout") {
+    if (request.method !== "POST") {
+      return errorResponse(405, "method_not_allowed", "This logout route only accepts POST.");
+    }
+
+    return jsonResponse(adminSessionBody(runtime, false), {
+      headers: {
+        "Set-Cookie": createExpiredSessionCookie(),
+      },
+    });
+  }
+
+  return errorResponse(404, "not_found", "Auth API route not found.");
+}
+
+async function authorizeAdmin(request: Request, runtime: PortalApiRuntime): Promise<Response | string> {
+  const session = await getAdminSession(request, runtime);
+
+  if (session instanceof Response) {
+    return session;
+  }
+
+  if (!session) {
+    return errorResponse(401, "admin_auth_required", "Admin login is required for admin APIs.");
+  }
+
+  return runtime.adminEmail;
 }
 
 function createToken(): string {
@@ -506,8 +780,12 @@ export async function handlePortalApiRequest(
     });
   }
 
+  if (pathParts[1] === "auth") {
+    return handleAuthRequest(request, runtime, pathParts);
+  }
+
   if (pathParts[1] === "admin") {
-    const authorization = authorizeAdmin(request, runtime);
+    const authorization = await authorizeAdmin(request, runtime);
 
     if (authorization instanceof Response) {
       return authorization;
