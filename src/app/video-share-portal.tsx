@@ -500,7 +500,7 @@ export function VideoSharePortal({
   if (tokenStatus === "loading") {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
-        <Card className="max-w-md text-center">
+        <Card className="w-full max-w-lg">
           <CardHeader>
             <CardTitle aria-level={1} className="text-2xl" role="heading">
               Loading video link
@@ -509,6 +509,11 @@ export function VideoSharePortal({
               Checking this secure video token.
             </CardDescription>
           </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="aspect-video animate-pulse rounded-lg bg-white/10" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-white/10" />
+            <div className="h-3 w-1/2 animate-pulse rounded bg-white/10" />
+          </CardContent>
         </Card>
       </main>
     );
@@ -531,14 +536,14 @@ export function VideoSharePortal({
   if (!video || !project) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
-        <Card className="max-w-md text-center">
+        <Card className="w-full max-w-md text-center">
           <CardHeader>
             <CardTitle aria-level={1} className="text-2xl" role="heading">
-              Video link not found
+              This video link is not available
             </CardTitle>
             <CardDescription className="text-sm leading-6">
               {tokenError ||
-                "This link does not include a video snapshot, and no local video matches this slug."}
+                "The link may have expired, been mistyped, or no longer point to a shared video."}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -548,22 +553,28 @@ export function VideoSharePortal({
 
   return (
     <main className="min-h-dvh bg-[color:var(--background)] text-[color:var(--foreground)]">
-      <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-4 py-5 lg:px-6">
-        <Card>
-          <CardHeader>
-            <Badge className="w-fit" variant="emphasisOutline">
+      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5 px-4 py-4 sm:py-6 lg:px-6">
+        <header className="rounded-xl border border-white/10 bg-[color:color-mix(in_oklab,var(--card)_88%,transparent)] p-4 sm:p-5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0 space-y-2">
+              <Badge className="w-fit" variant="emphasisOutline">
               {project.clientName || "Client review"}
+              </Badge>
+              <h1 className="break-words text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                {video.title}
+              </h1>
+              <p className="text-sm leading-6 text-[color:var(--muted-foreground)]">
+                {project.name}
+              </p>
+            </div>
+            <Badge className="w-fit gap-2 px-3 py-2 text-sm" variant="secondary">
+              <Gauge className="size-4" />
+              Suggested {video.recommendedPlaybackSpeed}x
             </Badge>
-            <CardTitle aria-level={1} className="text-3xl font-semibold" role="heading">
-              {video.title}
-            </CardTitle>
-            <CardDescription className="text-sm leading-6">
-              {project.name} - {getDurationMeta(video, effectiveDurationSeconds)}
-            </CardDescription>
-          </CardHeader>
-        </Card>
+          </div>
+        </header>
 
-        <section className="relative min-w-0 overflow-hidden rounded-lg border border-white/10 bg-black shadow-2xl shadow-black/30">
+        <section className="relative min-w-0 overflow-hidden rounded-xl border border-white/10 bg-black shadow-2xl shadow-black/30">
           {video.directVideoUrl ? (
             <video
               ref={nativeVideoRef}
@@ -587,15 +598,15 @@ export function VideoSharePortal({
           )}
 
           {!started ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/55 px-4">
-              <Card className="w-full max-w-sm border-sky-400/50 bg-black/80 text-center backdrop-blur">
-                <CardHeader className="items-center">
+            <div className="absolute inset-0 flex items-center justify-center bg-black/45 px-3 sm:px-4">
+              <div className="w-full max-w-md rounded-xl border border-sky-400/40 bg-black/75 p-4 text-center shadow-2xl backdrop-blur sm:p-5">
+                <div className="flex flex-col items-center gap-3">
                   <Badge className="gap-2" variant="secondary">
                     <Gauge className="size-4" />
                     {video.recommendedPlaybackSpeed}x review
                   </Badge>
-                  <CardTitle className="text-xl">Start faster review</CardTitle>
-                  <CardDescription className="space-y-2 text-sm">
+                  <h2 className="text-xl font-semibold text-white">Start faster review</h2>
+                  <div className="space-y-2 text-sm text-[color:var(--muted-foreground)]">
                     {watchTimeLabel ? (
                       <span className="flex items-center justify-center gap-2">
                         <Clock3 className="size-4" />
@@ -611,10 +622,8 @@ export function VideoSharePortal({
                         Attempting to start playback at {video.recommendedPlaybackSpeed}x.
                       </span>
                     ) : null}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button className="w-full" onClick={handleStart} size="xl" type="button">
+                  </div>
+                  <Button className="min-h-11 w-full" onClick={handleStart} size="xl" type="button">
                     <Play />
                     <span className="flex min-w-0 flex-col items-start gap-1 text-left">
                       <span>
@@ -636,8 +645,8 @@ export function VideoSharePortal({
                       )}
                     </span>
                   </Button>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             </div>
           ) : null}
         </section>

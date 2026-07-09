@@ -1,4 +1,5 @@
 import type { PlaybackSpeed, PortalData, PortalProject, PortalVideo } from "./portal-types";
+import { sanitizePublicPortalUrl } from "./portal-utils";
 
 type D1Result<T> = {
   results?: T[];
@@ -510,7 +511,7 @@ function getPublicShareUrl(runtime: PortalApiRuntime, record: PortalShareLinkRec
   const baseUrl = normalizePublicAppUrl(runtime.publicAppUrl);
   const route = getShareKind(record) === "video" ? "video" : "share";
 
-  return `${baseUrl}/${route}/${record.token}`;
+  return sanitizePublicPortalUrl(`${baseUrl}/${route}/${record.token}`);
 }
 
 function getRateLimitKey(request: Request): string {

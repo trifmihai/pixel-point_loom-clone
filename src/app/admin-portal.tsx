@@ -94,6 +94,7 @@ import {
   getPortalAppOrigin,
   isLocalAppOrigin,
   playbackSpeedOptions,
+  sanitizePublicPortalUrl,
 } from "./portal-utils";
 
 type ProjectDraft = {
@@ -266,6 +267,8 @@ export function AdminPortal(): React.JSX.Element {
   const [videoDraft, setVideoDraft] = React.useState<VideoDraft>(emptyVideoDraft);
   const [editVideoDraft, setEditVideoDraft] = React.useState<VideoDraft>(emptyVideoDraft);
   const [editDurationTouched, setEditDurationTouched] = React.useState(false);
+  const [createProjectOpen, setCreateProjectOpen] = React.useState(false);
+  const [addVideoOpen, setAddVideoOpen] = React.useState(false);
   const [editingVideoId, setEditingVideoId] = React.useState<string | null>(null);
   const [deleteVideoId, setDeleteVideoId] = React.useState<string | null>(null);
   const [activeVideoId, setActiveVideoId] = React.useState<string | null>(null);
@@ -290,6 +293,7 @@ export function AdminPortal(): React.JSX.Element {
   const previewPlayerRef = React.useRef<GumletPlayerHandle | null>(null);
   const productionCloudSyncDisabled = isProductionPagesHost() && !config.cloudSyncEnabled;
   const adminSessionExpected = config.cloudSyncEnabled || isProductionPagesHost();
+  const cloudBusy = config.cloudSyncEnabled && (cloudStatus === "loading" || cloudStatus === "saving");
 
   React.useEffect(() => {
     if (!config.cloudSyncEnabled) {
@@ -405,6 +409,7 @@ export function AdminPortal(): React.JSX.Element {
     setSelectedProjectId(nextData.projects[0]?.id ?? null);
     setProjectDraft(emptyProjectDraft);
     setShareStatus("");
+    setCreateProjectOpen(false);
   }
 
   function handleAddVideo(event: React.FormEvent<HTMLFormElement>): void {
@@ -429,11 +434,14 @@ export function AdminPortal(): React.JSX.Element {
     setData(nextData);
     setActiveVideoId(nextVideo?.id ?? null);
     setVideoDraft(emptyVideoDraft);
+    setAddVideoOpen(false);
   }
 
   async function createReviewLink(project: PortalProject, video?: PortalVideo): Promise<string> {
     if (!config.cloudSyncEnabled) {
-      return video ? createVideoShareUrl(project, video, appOrigin) : createShareUrl(project, appOrigin);
+      return sanitizePublicPortalUrl(
+        video ? createVideoShareUrl(project, video, appOrigin) : createShareUrl(project, appOrigin),
+      );
     }
 
     if (!cloudReadyRef.current) {
@@ -446,7 +454,7 @@ export function AdminPortal(): React.JSX.Element {
       videoId: video?.id,
     });
 
-    return response.url;
+    return sanitizePublicPortalUrl(response.url);
   }
 
   async function writeShareLinkToClipboard(url: string, copiedMessage: string, readyMessage: string): Promise<void> {
@@ -651,446 +659,395 @@ export function AdminPortal(): React.JSX.Element {
 
   return (
     <main className="min-h-dvh bg-[color:var(--background)] text-[color:var(--foreground)]">
-      <div className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-5 px-4 py-4 lg:grid lg:grid-cols-[360px_minmax(0,1fr)] lg:px-6">
-        <Card className="h-fit">
-          <CardHeader>
-            <Badge className="w-fit" variant="emphasisOutline">
-              Gumlet portal
-            </Badge>
-            <CardTitle aria-level={1} className="mt-1 text-2xl font-semibold" role="heading">
-              Client video reviews
-            </CardTitle>
-            <CardDescription className="text-sm leading-6">
-              Organize existing Gumlet videos, set suggested speed, and send unlisted review links.
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent className="space-y-3">
-            <div className="space-y-3 rounded-md border border-white/10 bg-black/10 p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge className="gap-2" variant="secondary">
-                  {config.cloudSyncEnabled ? (
-                    <Cloud className="size-4" />
-                  ) : (
-                    <CloudOff className="size-4" />
-                  )}
-                  {config.cloudSyncEnabled ? "Cloud sync" : "Local only"}
-                </Badge>
-                <Badge className="gap-2" variant="mutedOutline">
-                  <ShieldCheck className="size-4" />
-                  Admin access
-                </Badge>
+      <div className="mx-auto grid w-full max-w-[1280px] gap-4 px-4 py-4 lg:grid-cols-[300px_minmax(0,1fr)] lg:px-6">
+        <aside className="hidden lg:block">
+          <Card className="sticky top-4">
+            <CardHeader className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <Badge className="w-fit" variant="emphasisOutline">
+                    Gumlet portal
+                  </Badge>
+                  <CardTitle aria-level={1} className="mt-2 text-xl font-semibold" role="heading">
+                    Client reviews
+                  </CardTitle>
+                </div>
                 {adminSessionExpected ? (
                   <Button
-                    className="ml-auto"
+                    aria-label="Sign out"
                     onClick={() => void handleSignOut()}
-                    size="sm"
+                    size="icon-lg"
                     type="button"
                     variant="outline"
                   >
                     <LogOut />
-                    Sign out
                   </Button>
                 ) : null}
               </div>
-              <p className="leading-6 text-[color:var(--muted-foreground)]">
-                {config.cloudSyncEnabled
-                  ? `${cloudMessage} Admin APIs require the signed session cookie for ${config.adminEmail}.`
-                  : "Local mode stores projects only in this browser. Deployed admin APIs require the app login session."}
-              </p>
-              <dl className="grid gap-2 text-xs sm:grid-cols-2">
-                <div className="rounded-md border border-white/10 bg-black/10 p-2">
-                  <dt className="text-[color:var(--muted-foreground)]">Cloud sync enabled</dt>
-                  <dd className="font-medium text-white">{config.cloudSyncEnabled ? "true" : "false"}</dd>
+              <div className="rounded-md border border-white/10 bg-black/10 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="gap-2" variant="secondary">
+                    {config.cloudSyncEnabled ? <Cloud className="size-4" /> : <CloudOff className="size-4" />}
+                    {config.cloudSyncEnabled ? "Cloud sync" : "Local only"}
+                  </Badge>
+                  <Badge className="gap-2" variant="mutedOutline">
+                    <ShieldCheck className="size-4" />
+                    Admin
+                  </Badge>
                 </div>
-                <div className="rounded-md border border-white/10 bg-black/10 p-2">
-                  <dt className="text-[color:var(--muted-foreground)]">Local mode</dt>
-                  <dd className="font-medium text-white">{config.localMode ? "true" : "false"}</dd>
-                </div>
-                <div className="rounded-md border border-white/10 bg-black/10 p-2 sm:col-span-2">
-                  <dt className="text-[color:var(--muted-foreground)]">Public app URL</dt>
-                  <dd className="break-all font-medium text-white">{config.publicAppUrl}</dd>
-                </div>
-                <div className="rounded-md border border-white/10 bg-black/10 p-2 sm:col-span-2">
-                  <dt className="text-[color:var(--muted-foreground)]">Cloud sync status</dt>
-                  <dd className="font-medium text-white">
-                    {cloudStatus}: {cloudMessage}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-
-            {productionCloudSyncDisabled ? (
-              <Alert variant="destructive">
-                <AlertTitle>Production build warning</AlertTitle>
-                <AlertDescription>
-                  Cloud sync is disabled in this production build. Do not send ?data= links to clients.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            {config.cloudSyncEnabled && browserHasLocalProjects ? (
-              <Alert>
-                <AlertTitle>Local projects found</AlertTitle>
-                <AlertDescription className="space-y-3">
-                  <span className="block">{config.securityCopy.localImport}</span>
-                  <Button
-                    onClick={() => void handleImportLocalProjects()}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <HardDriveUpload />
-                    Import local projects to cloud
-                  </Button>
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            {config.cloudSyncEnabled && cloudStatus === "error" ? (
-              <Alert variant="destructive">
-                <AlertTitle>Cloud sync needs attention</AlertTitle>
-                <AlertDescription>{cloudMessage}</AlertDescription>
-              </Alert>
-            ) : null}
-          </CardContent>
-
-          <CardContent>
-            <form className="space-y-4" onSubmit={handleCreateProject}>
-              <Separator />
-              <FieldGroup className="gap-3">
-                <Field>
-                  <FieldLabel htmlFor="project-name">Project name</FieldLabel>
-                  <Input
-                    id="project-name"
-                    onChange={(event) =>
-                      setProjectDraft((draft) => ({ ...draft, name: event.target.value }))
-                    }
-                    required
-                    size="lg"
-                    value={projectDraft.name}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="project-client-name">Client name</FieldLabel>
-                  <Input
-                    id="project-client-name"
-                    onChange={(event) =>
-                      setProjectDraft((draft) => ({ ...draft, clientName: event.target.value }))
-                    }
-                    size="lg"
-                    value={projectDraft.clientName}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="project-description">Project description</FieldLabel>
-                  <Textarea
-                    id="project-description"
-                    onChange={(event) =>
-                      setProjectDraft((draft) => ({ ...draft, description: event.target.value }))
-                    }
-                    size="lg"
-                    value={projectDraft.description}
-                  />
-                </Field>
-              </FieldGroup>
-              <Button className="w-full" size="xl" type="submit">
-                <Plus />
-                Create project
-              </Button>
-            </form>
-          </CardContent>
-
-          <CardContent className="space-y-2">
-            {data.projects.map((project) => (
+                <p className="mt-2 text-xs leading-5 text-[color:var(--muted-foreground)]">
+                  {cloudMessage}
+                </p>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
               <Button
-                className={`!h-auto w-full justify-start whitespace-normal px-3 py-3 text-left ${
-                  selectedProject?.id === project.id
-                    ? "border-sky-400/60 bg-sky-400/10 text-white"
-                    : "text-white"
-                }`}
-                key={project.id}
-                onClick={() => {
-                  setSelectedProjectId(project.id);
-                  setActiveVideoId(project.videos[0]?.id ?? null);
-                  setShareStatus("");
-                }}
+                className="w-full"
+                onClick={() => setCreateProjectOpen(true)}
+                size="xl"
                 type="button"
-                variant="outline"
               >
-                <span className="flex min-w-0 flex-col items-start gap-1">
-                  <span className="truncate text-sm font-medium">{project.name}</span>
-                  <span className="text-xs text-[color:var(--muted-foreground)]">
-                    {project.clientName ? `${project.clientName} - ` : ""}
-                    {project.videos.length} videos - Updated {formatDate(project.updatedAt)}
-                  </span>
-                </span>
+                <Plus />
+                New project
               </Button>
-            ))}
-          </CardContent>
-        </Card>
 
-        <Card className="min-w-0">
-          {selectedProject ? (
-            <>
-              <CardHeader className="gap-4 xl:grid-cols-[1fr_auto]">
-                <div className="min-w-0 space-y-3">
-                  <CardTitle
-                    aria-level={1}
-                    className="text-3xl font-semibold text-white"
-                    role="heading"
-                  >
-                    {selectedProject.name}
-                  </CardTitle>
-                  <FieldGroup className="grid gap-2 md:grid-cols-2">
-                    <Field className="md:col-span-2">
-                      <FieldLabel htmlFor="selected-project-name">Project name</FieldLabel>
-                      <Input
-                        aria-label="Selected project name"
-                        id="selected-project-name"
-                        onChange={(event) => updateSelectedProject({ name: event.target.value })}
-                        size="lg"
-                        value={selectedProject.name}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="selected-client-name">Client name</FieldLabel>
-                      <Input
-                        aria-label="Selected client name"
-                        id="selected-client-name"
-                        onChange={(event) =>
-                          updateSelectedProject({ clientName: event.target.value })
-                        }
-                        placeholder="Client name"
-                        size="lg"
-                        value={selectedProject.clientName ?? ""}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="share-url">Share URL</FieldLabel>
-                      <Input
-                        aria-label="Share URL"
-                        id="share-url"
-                        readOnly
-                        size="lg"
-                        value={shareUrl}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="share-passcode">Optional share passcode</FieldLabel>
-                      <Input
-                        aria-label="Optional share passcode"
-                        disabled={!config.cloudSyncEnabled}
-                        id="share-passcode"
-                        onChange={(event) => setSharePasscode(event.target.value)}
-                        placeholder={
-                          config.cloudSyncEnabled ? "No passcode" : "Cloud sync only"
-                        }
-                        size="lg"
-                        type="password"
-                        value={sharePasscode}
-                      />
-                    </Field>
-                    <Field className="md:col-span-2">
-                      <FieldLabel htmlFor="selected-project-description">
-                        Project description
-                      </FieldLabel>
-                      <Textarea
-                        aria-label="Selected project description"
-                        id="selected-project-description"
-                        onChange={(event) =>
-                          updateSelectedProject({ description: event.target.value })
-                        }
-                        placeholder="Project description"
-                        size="lg"
-                        value={selectedProject.description ?? ""}
-                      />
-                    </Field>
-                  </FieldGroup>
-                </div>
+              <details className="rounded-md border border-white/10 bg-black/10 p-3 text-xs">
+                <summary className="cursor-pointer font-medium text-white">System status</summary>
+                <dl className="mt-3 grid gap-2">
+                  <div>
+                    <dt className="text-[color:var(--muted-foreground)]">Cloud sync enabled</dt>
+                    <dd className="font-medium text-white">{config.cloudSyncEnabled ? "true" : "false"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[color:var(--muted-foreground)]">Local mode</dt>
+                    <dd className="font-medium text-white">{config.localMode ? "true" : "false"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[color:var(--muted-foreground)]">Public app URL</dt>
+                    <dd className="break-all font-medium text-white">{config.publicAppUrl}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[color:var(--muted-foreground)]">Cloud sync status</dt>
+                    <dd className="font-medium text-white">
+                      {cloudStatus}: {cloudMessage}
+                    </dd>
+                  </div>
+                </dl>
+              </details>
 
-                <CardAction className="static col-auto row-auto flex flex-wrap gap-2 justify-self-start xl:justify-self-end">
-                  <Button
-                    onClick={() => void handleCopyShareLink(selectedProject)}
-                    size="lg"
-                    type="button"
-                    variant="outline"
-                  >
-                    <Copy />
-                    Copy client link
-                  </Button>
-                  <Button
-                    onClick={() => void handleOpenShareLink(selectedProject)}
-                    size="lg"
-                    type="button"
-                    variant="outline"
-                  >
-                    <ExternalLink />
-                    Open
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      setData((current) => deleteProject(current, selectedProject.id));
-                      setSelectedProjectId(null);
-                    }}
-                    size="lg"
-                    type="button"
-                    variant="destructive"
-                  >
-                    <Trash2 />
-                    Delete
-                  </Button>
-                </CardAction>
-              </CardHeader>
-
-              <CardContent className="space-y-5">
-                <Separator />
-
-                {isLocalShareOrigin ? (
-                  <Alert variant="destructive">
-                    <AlertTitle>Local-only share links</AlertTitle>
-                    <AlertDescription>
-                      This is a local-only link. Deploy to Cloudflare Pages and set the public app
-                      URL before sending to clients.
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-
-                <Alert>
-                  <AlertTitle>Unlisted link security</AlertTitle>
+              {productionCloudSyncDisabled ? (
+                <Alert variant="destructive">
+                  <AlertTitle>Production build warning</AlertTitle>
                   <AlertDescription>
-                    Anyone with this link can view the shared video page. Do not include sensitive
-                    information in titles, descriptions, or URL data unless Gumlet access is
-                    restricted.
+                    Cloud sync is disabled in this production build. Do not send ?data= links to clients.
                   </AlertDescription>
                 </Alert>
+              ) : null}
 
-                {shareStatus ? (
-                  <Badge className="gap-2 px-3 py-2 text-sm" variant="secondary">
-                    <CheckCircle2 className="size-4" />
-                    {shareStatus}
-                  </Badge>
-                ) : null}
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Add Gumlet video</CardTitle>
-                    <CardDescription>
-                      Paste an existing Gumlet asset ID, watch link, embed code, or MP4 URL.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <form
-                      className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
-                      onSubmit={handleAddVideo}
+              {config.cloudSyncEnabled && browserHasLocalProjects ? (
+                <Alert>
+                  <AlertTitle>Local projects found</AlertTitle>
+                  <AlertDescription className="space-y-3">
+                    <span className="block">{config.securityCopy.localImport}</span>
+                    <Button
+                      onClick={() => void handleImportLocalProjects()}
+                      size="sm"
+                      type="button"
+                      variant="outline"
                     >
-                      <Field>
-                        <FieldLabel htmlFor="gumlet-asset-id">Gumlet URL or asset ID</FieldLabel>
-                        <Input
-                          id="gumlet-asset-id"
-                          onChange={(event) =>
-                            setVideoDraft((draft) => ({ ...draft, assetId: event.target.value }))
-                          }
-                          required
-                          size="lg"
-                          value={videoDraft.assetId}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="video-title">Video title</FieldLabel>
-                        <Input
-                          id="video-title"
-                          onChange={(event) =>
-                            setVideoDraft((draft) => ({ ...draft, title: event.target.value }))
-                          }
-                          required
-                          size="lg"
-                          value={videoDraft.title}
-                        />
-                      </Field>
-                      <Field className="xl:col-span-2">
-                        <FieldLabel htmlFor="video-description">Video description</FieldLabel>
-                        <Input
-                          id="video-description"
-                          onChange={(event) =>
-                            setVideoDraft((draft) => ({
-                              ...draft,
-                              description: event.target.value,
-                            }))
-                          }
-                          size="lg"
-                          value={videoDraft.description}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="thumbnail-url">Thumbnail URL</FieldLabel>
-                        <Input
-                          id="thumbnail-url"
-                          onChange={(event) =>
-                            setVideoDraft((draft) => ({
-                              ...draft,
-                              thumbnailUrl: event.target.value,
-                            }))
-                          }
-                          size="lg"
-                          value={videoDraft.thumbnailUrl}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="duration-seconds">Duration in seconds</FieldLabel>
-                        <Input
-                          id="duration-seconds"
-                          inputMode="numeric"
-                          onChange={(event) =>
-                            setVideoDraft((draft) => ({
-                              ...draft,
-                              durationSeconds: event.target.value,
-                            }))
-                          }
-                          size="lg"
-                          value={videoDraft.durationSeconds}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="start-time-seconds">Start time in seconds</FieldLabel>
-                        <Input
-                          id="start-time-seconds"
-                          inputMode="numeric"
-                          onChange={(event) =>
-                            setVideoDraft((draft) => ({
-                              ...draft,
-                              startTimeSeconds: event.target.value,
-                            }))
-                          }
-                          size="lg"
-                          value={videoDraft.startTimeSeconds}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel>Recommended speed</FieldLabel>
-                        <SpeedSelect
-                          ariaLabel="Recommended speed"
-                          onValueChange={(recommendedPlaybackSpeed) =>
-                            setVideoDraft((draft) => ({
-                              ...draft,
-                              recommendedPlaybackSpeed,
-                            }))
-                          }
-                          value={videoDraft.recommendedPlaybackSpeed}
-                        />
-                      </Field>
-                      <Button className="md:self-end" size="xl" type="submit">
-                        <Plus />
-                        Add video
-                      </Button>
-                    </form>
-                  </CardContent>
-                </Card>
+                      <HardDriveUpload />
+                      Import
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              ) : null}
 
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              {config.cloudSyncEnabled && cloudStatus === "error" ? (
+                <Alert variant="destructive">
+                  <AlertTitle>Cloud sync needs attention</AlertTitle>
+                  <AlertDescription>{cloudMessage}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              <Separator />
+              <div className="space-y-2">
+                {data.projects.length > 0 ? (
+                  data.projects.map((project) => (
+                    <Button
+                      className={`!h-auto w-full justify-start whitespace-normal px-3 py-3 text-left ${
+                        selectedProject?.id === project.id
+                          ? "border-sky-400/60 bg-sky-400/10 text-white"
+                          : "text-white"
+                      }`}
+                      key={project.id}
+                      onClick={() => {
+                        setSelectedProjectId(project.id);
+                        setActiveVideoId(project.videos[0]?.id ?? null);
+                        setShareStatus("");
+                      }}
+                      type="button"
+                      variant="outline"
+                    >
+                      <span className="flex min-w-0 flex-col items-start gap-1">
+                        <span className="w-full truncate text-sm font-medium">{project.name}</span>
+                        <span className="text-xs text-[color:var(--muted-foreground)]">
+                          {project.videos.length} videos
+                        </span>
+                      </span>
+                    </Button>
+                  ))
+                ) : (
+                  <Empty className="min-h-[180px]" variant="outline">
+                    <EmptyHeader>
+                      <EmptyTitle>No projects</EmptyTitle>
+                      <EmptyDescription>Create a project to start.</EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+
+        <div className="min-w-0 space-y-4">
+          <div className="lg:hidden">
+            <Card>
+              <CardHeader className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    {activeVideo ? (
-                      <div className="space-y-3">
+                    <Badge className="w-fit" variant="emphasisOutline">
+                      Gumlet portal
+                    </Badge>
+                    <CardTitle className="mt-2 text-xl">Client reviews</CardTitle>
+                    <CardDescription className="text-sm">
+                      {config.cloudSyncEnabled ? "Cloud sync" : "Local only"} - {cloudStatus}
+                    </CardDescription>
+                  </div>
+                  {adminSessionExpected ? (
+                    <Button
+                      aria-label="Sign out"
+                      onClick={() => void handleSignOut()}
+                      size="icon-lg"
+                      type="button"
+                      variant="outline"
+                    >
+                      <LogOut />
+                    </Button>
+                  ) : null}
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={() => setCreateProjectOpen(true)}
+                  size="xl"
+                  type="button"
+                >
+                  <Plus />
+                  New project
+                </Button>
+                {data.projects.length > 0 ? (
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {data.projects.map((project) => (
+                      <Button
+                        className="min-w-[220px] justify-start"
+                        key={project.id}
+                        onClick={() => {
+                          setSelectedProjectId(project.id);
+                          setActiveVideoId(project.videos[0]?.id ?? null);
+                          setShareStatus("");
+                        }}
+                        size="lg"
+                        type="button"
+                        variant={selectedProject?.id === project.id ? "secondary" : "outline"}
+                      >
+                        <span className="truncate">{project.name}</span>
+                      </Button>
+                    ))}
+                  </div>
+                ) : null}
+              </CardHeader>
+            </Card>
+          </div>
+
+          {selectedProject ? (
+            <>
+              <header className="rounded-xl border border-white/10 bg-[color:color-mix(in_oklab,var(--card)_88%,transparent)] p-4">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 space-y-2">
+                    <Badge className="w-fit" variant="mutedOutline">
+                      {selectedProject.clientName || "Client"}
+                    </Badge>
+                    <h1 className="truncate text-3xl font-semibold tracking-tight text-white">
+                      {selectedProject.name}
+                    </h1>
+                    <div className="flex flex-wrap gap-2 text-sm text-[color:var(--muted-foreground)]">
+                      <span>{videos.length} videos</span>
+                      <span>Updated {formatDate(selectedProject.updatedAt)}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row xl:justify-end">
+                    <Button
+                      className="w-full sm:w-auto"
+                      disabled={cloudBusy}
+                      onClick={() => void handleCopyShareLink(selectedProject)}
+                      size="xl"
+                      type="button"
+                    >
+                      <Copy />
+                      Copy client link
+                    </Button>
+                    <Button
+                      className="w-full sm:w-auto"
+                      disabled={cloudBusy}
+                      onClick={() => void handleOpenShareLink(selectedProject)}
+                      size="xl"
+                      type="button"
+                      variant="outline"
+                    >
+                      <ExternalLink />
+                      Open
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button
+                            aria-label="Project actions"
+                            className="w-full sm:w-auto"
+                            size="icon-xl"
+                            type="button"
+                            variant="outline"
+                          />
+                        }
+                      >
+                        <MoreHorizontal />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setData((current) => deleteProject(current, selectedProject.id));
+                            setSelectedProjectId(null);
+                          }}
+                          variant="destructive"
+                        >
+                          <Trash2 />
+                          Delete project
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              </header>
+
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <section className="min-w-0 space-y-4">
+                  {isLocalShareOrigin ? (
+                    <Alert variant="destructive">
+                      <AlertTitle>Local-only share links</AlertTitle>
+                      <AlertDescription>
+                        This is a local-only link. Deploy to Cloudflare Pages and set the public app URL before sending to clients.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+
+                  {shareStatus ? (
+                    <Badge className="gap-2 px-3 py-2 text-sm" variant="secondary">
+                      <CheckCircle2 className="size-4" />
+                      {shareStatus}
+                    </Badge>
+                  ) : null}
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Project settings</CardTitle>
+                      <CardDescription>
+                        Client-facing metadata and optional passcode for newly created cloud links.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <FieldGroup className="grid gap-3 md:grid-cols-2">
+                        <Field>
+                          <FieldLabel htmlFor="selected-project-name">Project name</FieldLabel>
+                          <Input
+                            aria-label="Selected project name"
+                            id="selected-project-name"
+                            onChange={(event) => updateSelectedProject({ name: event.target.value })}
+                            size="lg"
+                            value={selectedProject.name}
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="selected-client-name">Client name</FieldLabel>
+                          <Input
+                            aria-label="Selected client name"
+                            id="selected-client-name"
+                            onChange={(event) =>
+                              updateSelectedProject({ clientName: event.target.value })
+                            }
+                            placeholder="Client name"
+                            size="lg"
+                            value={selectedProject.clientName ?? ""}
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="share-passcode">Optional share passcode</FieldLabel>
+                          <Input
+                            aria-label="Optional share passcode"
+                            disabled={!config.cloudSyncEnabled}
+                            id="share-passcode"
+                            onChange={(event) => setSharePasscode(event.target.value)}
+                            placeholder={config.cloudSyncEnabled ? "No passcode" : "Cloud sync only"}
+                            size="lg"
+                            type="password"
+                            value={sharePasscode}
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="share-url">Share URL</FieldLabel>
+                          <Input
+                            aria-label="Share URL"
+                            id="share-url"
+                            readOnly
+                            size="lg"
+                            value={shareUrl}
+                          />
+                        </Field>
+                        <Field className="md:col-span-2">
+                          <FieldLabel htmlFor="selected-project-description">Project description</FieldLabel>
+                          <Textarea
+                            aria-label="Selected project description"
+                            id="selected-project-description"
+                            onChange={(event) =>
+                              updateSelectedProject({ description: event.target.value })
+                            }
+                            placeholder="Project description"
+                            size="lg"
+                            value={selectedProject.description ?? ""}
+                          />
+                        </Field>
+                      </FieldGroup>
+                    </CardContent>
+                  </Card>
+
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-white">Video review</h2>
+                      <p className="text-sm text-[color:var(--muted-foreground)]">
+                        Preview the selected Gumlet video and copy a single-video client link.
+                      </p>
+                    </div>
+                    <Button
+                      className="w-full sm:w-auto"
+                      onClick={() => setAddVideoOpen(true)}
+                      size="xl"
+                      type="button"
+                    >
+                      <Plus />
+                      Add Gumlet video
+                    </Button>
+                  </div>
+
+                  {activeVideo ? (
+                    <div className="space-y-4">
+                      <div className="overflow-hidden rounded-xl border border-white/10 bg-black">
                         <GumletPlayer
                           ref={previewPlayerRef}
                           onDuration={(durationSeconds) =>
@@ -1098,169 +1055,379 @@ export function AdminPortal(): React.JSX.Element {
                           }
                           video={activeVideo}
                         />
-                        <Card>
-                          <CardHeader>
+                      </div>
+                      <Card>
+                        <CardHeader className="gap-3 md:grid-cols-[1fr_auto]">
+                          <div className="min-w-0">
                             <CardTitle aria-level={2} className="text-2xl" role="heading">
                               {activeVideo.title}
                             </CardTitle>
                             <CardDescription className="text-sm">
                               {getVideoMeta(activeVideo)}
                             </CardDescription>
-                          </CardHeader>
-                          <CardContent className="text-sm leading-6 text-[color:var(--muted-foreground)]">
-                            {activeVideo.description || "No description added."}
-                          </CardContent>
-                        </Card>
-                      </div>
-                    ) : (
-                      <Empty className="min-h-[260px]" variant="outline">
-                        <EmptyHeader>
-                          <EmptyTitle>Add a Gumlet video</EmptyTitle>
-                          <EmptyDescription>
-                            Add a Gumlet video to preview it here.
-                          </EmptyDescription>
-                        </EmptyHeader>
-                      </Empty>
-                    )}
-                  </div>
-
-                  <div className="space-y-3">
-                    {videos.map((video, index) => (
-                      <Card
-                        className={
-                          activeVideo?.id === video.id
-                            ? "border border-sky-400/60 bg-sky-400/10"
-                            : undefined
-                        }
-                        key={video.id}
-                        size="sm"
-                      >
-                        <CardHeader className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
-                          <Button
-                            className="!h-auto w-full justify-start whitespace-normal px-0 py-0 text-left"
-                            onClick={() => setActiveVideoId(video.id)}
-                            type="button"
-                            variant="ghost-static"
-                          >
-                            <span className="flex min-w-0 flex-col items-start gap-1">
-                              <span className="font-semibold text-white">{video.title}</span>
-                              <span className="text-xs text-[color:var(--muted-foreground)]">
-                                {getVideoMeta(video)}
-                              </span>
-                            </span>
-                          </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              render={
-                                <Button
-                                  aria-label={`Video actions for ${video.title}`}
-                                  size="icon"
-                                  type="button"
-                                  variant="outline"
-                                />
-                              }
+                          </div>
+                          <CardAction className="static col-auto row-auto flex flex-col gap-2 sm:flex-row">
+                            <Button
+                              className="w-full sm:w-auto"
+                              disabled={cloudBusy}
+                              onClick={() => void handleCopyVideoLink(selectedProject, activeVideo)}
+                              size="lg"
+                              type="button"
+                              variant="outline"
                             >
-                              <MoreHorizontal />
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem onClick={() => handleRefreshVideoDuration(video)}>
-                                <RefreshCw />
-                                Refresh duration
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => openEditVideo(video)}>
-                                <Pencil />
-                                Edit video
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => setDeleteVideoId(video.id)}
-                                variant="destructive"
-                              >
-                                <Trash2 />
-                                Delete video
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                              <Copy />
+                              Copy video link
+                            </Button>
+                            <Button
+                              className="w-full sm:w-auto"
+                              disabled={cloudBusy}
+                              onClick={() => void handleOpenVideoLink(selectedProject, activeVideo)}
+                              size="lg"
+                              type="button"
+                              variant="outline"
+                            >
+                              <ExternalLink />
+                              Open video link
+                            </Button>
+                          </CardAction>
                         </CardHeader>
-                        <CardContent className="space-y-3">
-                          <div className="min-w-0 rounded-md border border-white/10 bg-black/10 px-3 py-2 text-xs leading-5 text-[color:var(--muted-foreground)]">
-                            <p className="truncate text-white">{video.assetId}</p>
-                            <p>
-                              {video.durationSeconds
-                                ? `${formatDuration(video.durationSeconds)} source length`
-                                : "Duration will be detected from Gumlet when available."}
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                          <Button
-                            onClick={() => void handleCopyVideoLink(selectedProject, video)}
-                            size="lg"
-                            type="button"
-                            variant="outline"
-                          >
-                            <Copy />
-                            Copy video link
-                          </Button>
-                          <Button
-                            onClick={() => void handleOpenVideoLink(selectedProject, video)}
-                            size="lg"
-                            type="button"
-                            variant="outline"
-                          >
-                            <ExternalLink />
-                            Open video link
-                          </Button>
-                          <Button
-                            aria-label={`Move ${video.title} up`}
-                            disabled={index === 0}
-                            onClick={() =>
-                              setData((current) =>
-                                moveVideo(current, selectedProject.id, video.id, "up"),
-                              )
-                            }
-                            size="icon"
-                            type="button"
-                            variant="outline"
-                          >
-                            <ArrowUp />
-                          </Button>
-                          <Button
-                            aria-label={`Move ${video.title} down`}
-                            disabled={index === videos.length - 1}
-                            onClick={() =>
-                              setData((current) =>
-                                moveVideo(current, selectedProject.id, video.id, "down"),
-                              )
-                            }
-                            size="icon"
-                            type="button"
-                            variant="outline"
-                          >
-                            <ArrowDown />
-                          </Button>
-                          </div>
+                        <CardContent className="text-sm leading-6 text-[color:var(--muted-foreground)]">
+                          {activeVideo.description || "No description added."}
                         </CardContent>
                       </Card>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
+                    </div>
+                  ) : (
+                    <Empty className="min-h-[320px]" variant="outline">
+                      <EmptyHeader>
+                        <EmptyTitle>Add a Gumlet video</EmptyTitle>
+                        <EmptyDescription>
+                          Add a Gumlet video to preview it here.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                      <Button onClick={() => setAddVideoOpen(true)} size="xl" type="button">
+                        <Plus />
+                        Add Gumlet video
+                      </Button>
+                    </Empty>
+                  )}
+                </section>
+
+                <aside className="min-w-0 space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Video list</CardTitle>
+                      <CardDescription>{videos.length} videos in this project</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {videos.length > 0 ? (
+                        videos.map((video, index) => (
+                          <div
+                            className={`rounded-lg border p-3 ${
+                              activeVideo?.id === video.id
+                                ? "border-sky-400/60 bg-sky-400/10"
+                                : "border-white/10 bg-black/10"
+                            }`}
+                            key={video.id}
+                          >
+                            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                              <Button
+                                className="!h-auto w-full justify-start whitespace-normal px-0 py-0 text-left"
+                                onClick={() => setActiveVideoId(video.id)}
+                                type="button"
+                                variant="ghost-static"
+                              >
+                                <span className="flex min-w-0 flex-col items-start gap-1">
+                                  <span className="w-full truncate font-semibold text-white">
+                                    {video.title}
+                                  </span>
+                                  <span className="text-xs text-[color:var(--muted-foreground)]">
+                                    {getVideoMeta(video)}
+                                  </span>
+                                </span>
+                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger
+                                  render={
+                                    <Button
+                                      aria-label={`Video actions for ${video.title}`}
+                                      size="icon"
+                                      type="button"
+                                      variant="outline"
+                                    />
+                                  }
+                                >
+                                  <MoreHorizontal />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-44">
+                                  <DropdownMenuItem onClick={() => handleRefreshVideoDuration(video)}>
+                                    <RefreshCw />
+                                    Refresh duration
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => openEditVideo(video)}>
+                                    <Pencil />
+                                    Edit video
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => setDeleteVideoId(video.id)}
+                                    variant="destructive"
+                                  >
+                                    <Trash2 />
+                                    Delete video
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button
+                                aria-label={`Move ${video.title} up`}
+                                disabled={index === 0}
+                                onClick={() =>
+                                  setData((current) =>
+                                    moveVideo(current, selectedProject.id, video.id, "up"),
+                                  )
+                                }
+                                size="icon"
+                                type="button"
+                                variant="outline"
+                              >
+                                <ArrowUp />
+                              </Button>
+                              <Button
+                                aria-label={`Move ${video.title} down`}
+                                disabled={index === videos.length - 1}
+                                onClick={() =>
+                                  setData((current) =>
+                                    moveVideo(current, selectedProject.id, video.id, "down"),
+                                  )
+                                }
+                                size="icon"
+                                type="button"
+                                variant="outline"
+                              >
+                                <ArrowDown />
+                              </Button>
+                              <span className="min-w-0 rounded-md border border-white/10 bg-black/10 px-2 py-1 text-xs text-[color:var(--muted-foreground)]">
+                                {video.durationSeconds
+                                  ? `${formatDuration(video.durationSeconds)} source`
+                                  : "Detect duration"}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <Empty className="min-h-[220px]" variant="outline">
+                          <EmptyHeader>
+                            <EmptyTitle>No videos yet</EmptyTitle>
+                            <EmptyDescription>Add a Gumlet video to build the review.</EmptyDescription>
+                          </EmptyHeader>
+                        </Empty>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Alert>
+                    <AlertTitle>Unlisted link security</AlertTitle>
+                    <AlertDescription>
+                      Anyone with a token link can view the shared client page. Keep sensitive context out of titles and descriptions unless Gumlet access is restricted.
+                    </AlertDescription>
+                  </Alert>
+                </aside>
+              </div>
             </>
           ) : (
-            <CardContent>
-              <Empty className="min-h-[480px]" variant="outline">
-                <EmptyHeader>
-                  <EmptyTitle className="text-2xl">Create your first project</EmptyTitle>
-                  <EmptyDescription className="max-w-md text-sm leading-6">
-                    Projects group Gumlet videos for one client review link. Add a project from the
-                    left panel to start.
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            </CardContent>
+            <Empty className="min-h-[520px]" variant="outline">
+              <EmptyHeader>
+                <EmptyTitle className="text-2xl">Create your first project</EmptyTitle>
+                <EmptyDescription className="max-w-md text-sm leading-6">
+                  Projects group Gumlet videos for one client review link. Start with a project, then add the videos you want reviewed.
+                </EmptyDescription>
+              </EmptyHeader>
+              <Button onClick={() => setCreateProjectOpen(true)} size="xl" type="button">
+                <Plus />
+                New project
+              </Button>
+            </Empty>
           )}
-        </Card>
+        </div>
       </div>
+
+      <Dialog onOpenChange={setCreateProjectOpen} open={createProjectOpen}>
+        <DialogContent layout="sections" size="xl">
+          <DialogHeader>
+            <DialogTitle>Create project</DialogTitle>
+            <DialogDescription>
+              Create a client review workspace. You can edit these details later.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateProject}>
+            <DialogBody className="grid gap-3 md:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="project-name">Project name</FieldLabel>
+                <Input
+                  id="project-name"
+                  onChange={(event) =>
+                    setProjectDraft((draft) => ({ ...draft, name: event.target.value }))
+                  }
+                  required
+                  size="lg"
+                  value={projectDraft.name}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="project-client-name">Client name</FieldLabel>
+                <Input
+                  id="project-client-name"
+                  onChange={(event) =>
+                    setProjectDraft((draft) => ({ ...draft, clientName: event.target.value }))
+                  }
+                  size="lg"
+                  value={projectDraft.clientName}
+                />
+              </Field>
+              <Field className="md:col-span-2">
+                <FieldLabel htmlFor="project-description">Project description</FieldLabel>
+                <Textarea
+                  id="project-description"
+                  onChange={(event) =>
+                    setProjectDraft((draft) => ({ ...draft, description: event.target.value }))
+                  }
+                  size="lg"
+                  value={projectDraft.description}
+                />
+              </Field>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setCreateProjectOpen(false)} type="button" variant="outline">
+                Cancel
+              </Button>
+              <Button size="xl" type="submit">
+                <Plus />
+                Create project
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog onOpenChange={setAddVideoOpen} open={addVideoOpen}>
+        <DialogContent layout="sections" size="2xl">
+          <DialogHeader>
+            <DialogTitle>Add Gumlet video</DialogTitle>
+            <DialogDescription>
+              Paste an existing Gumlet asset ID, watch link, embed code, or MP4 URL.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAddVideo}>
+            <DialogBody className="grid gap-3 md:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="gumlet-asset-id">Gumlet URL or asset ID</FieldLabel>
+                <Input
+                  id="gumlet-asset-id"
+                  onChange={(event) =>
+                    setVideoDraft((draft) => ({ ...draft, assetId: event.target.value }))
+                  }
+                  required
+                  size="lg"
+                  value={videoDraft.assetId}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="video-title">Video title</FieldLabel>
+                <Input
+                  id="video-title"
+                  onChange={(event) =>
+                    setVideoDraft((draft) => ({ ...draft, title: event.target.value }))
+                  }
+                  required
+                  size="lg"
+                  value={videoDraft.title}
+                />
+              </Field>
+              <Field className="md:col-span-2">
+                <FieldLabel htmlFor="video-description">Video description</FieldLabel>
+                <Input
+                  id="video-description"
+                  onChange={(event) =>
+                    setVideoDraft((draft) => ({
+                      ...draft,
+                      description: event.target.value,
+                    }))
+                  }
+                  size="lg"
+                  value={videoDraft.description}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="thumbnail-url">Thumbnail URL</FieldLabel>
+                <Input
+                  id="thumbnail-url"
+                  onChange={(event) =>
+                    setVideoDraft((draft) => ({
+                      ...draft,
+                      thumbnailUrl: event.target.value,
+                    }))
+                  }
+                  size="lg"
+                  value={videoDraft.thumbnailUrl}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="duration-seconds">Duration in seconds</FieldLabel>
+                <Input
+                  id="duration-seconds"
+                  inputMode="numeric"
+                  onChange={(event) =>
+                    setVideoDraft((draft) => ({
+                      ...draft,
+                      durationSeconds: event.target.value,
+                    }))
+                  }
+                  size="lg"
+                  value={videoDraft.durationSeconds}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="start-time-seconds">Start time in seconds</FieldLabel>
+                <Input
+                  id="start-time-seconds"
+                  inputMode="numeric"
+                  onChange={(event) =>
+                    setVideoDraft((draft) => ({
+                      ...draft,
+                      startTimeSeconds: event.target.value,
+                    }))
+                  }
+                  size="lg"
+                  value={videoDraft.startTimeSeconds}
+                />
+              </Field>
+              <Field>
+                <FieldLabel>Recommended speed</FieldLabel>
+                <SpeedSelect
+                  ariaLabel="Recommended speed"
+                  onValueChange={(recommendedPlaybackSpeed) =>
+                    setVideoDraft((draft) => ({
+                      ...draft,
+                      recommendedPlaybackSpeed,
+                    }))
+                  }
+                  value={videoDraft.recommendedPlaybackSpeed}
+                />
+              </Field>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setAddVideoOpen(false)} type="button" variant="outline">
+                Cancel
+              </Button>
+              <Button disabled={!selectedProject} size="xl" type="submit">
+                <Plus />
+                Add video
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         onOpenChange={(open) => {

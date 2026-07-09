@@ -14,10 +14,12 @@ import {
   estimateWatchTimeSeconds,
   formatDuration,
   formatSavedTime,
+  getPublicHashRedirectPath,
   isLocalAppOrigin,
   normalizePublicAppUrl,
   parseGumletInput,
   resolvePortalAppOrigin,
+  sanitizePublicPortalUrl,
 } from "./portal-utils";
 
 const projectFixture: PortalProject = {
@@ -175,6 +177,32 @@ describe("portal utilities", () => {
     expect(projectUrl).toMatch(/^https:\/\/pixel-point-loom-clone\.pages\.dev\/share\//);
     expect(videoUrl).toMatch(/^https:\/\/pixel-point-loom-clone\.pages\.dev\/video\//);
     expect(`${projectUrl}\n${videoUrl}`).not.toMatch(/localhost|127\.0\.0\.1/);
+  });
+
+  it("sanitizes accidental hash-based public share and video URLs", () => {
+    expect(
+      sanitizePublicPortalUrl(
+        "https://pixel-point-loom-clone.pages.dev/#/video/10557bcb6403a150d5b4ad9968afc3cbff4e",
+      ),
+    ).toBe(
+      "https://pixel-point-loom-clone.pages.dev/video/10557bcb6403a150d5b4ad9968afc3cbff4e",
+    );
+    expect(sanitizePublicPortalUrl("https://pixel-point-loom-clone.pages.dev/#/share/token_1")).toBe(
+      "https://pixel-point-loom-clone.pages.dev/share/token_1",
+    );
+    expect(sanitizePublicPortalUrl("https://pixel-point-loom-clone.pages.dev#/video/token_2")).toBe(
+      "https://pixel-point-loom-clone.pages.dev/video/token_2",
+    );
+    expect(sanitizePublicPortalUrl("/#/share/token_3")).toBe("/share/token_3");
+  });
+
+  it("derives clean public paths from root hash routes before admin redirect", () => {
+    expect(getPublicHashRedirectPath("#/video/abc123")).toBe("/video/abc123");
+    expect(getPublicHashRedirectPath("#/share/token_1?pass=old")).toBe(
+      "/share/token_1?pass=old",
+    );
+    expect(getPublicHashRedirectPath("#/admin")).toBeNull();
+    expect(getPublicHashRedirectPath("")).toBeNull();
   });
 
   it("detects local app origins that need a client-link warning", () => {

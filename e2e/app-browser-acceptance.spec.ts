@@ -43,7 +43,32 @@ test("browser: root redirects to the protected admin route", async ({ page }) =>
   await page.goto("/");
 
   await expect(page).toHaveURL(/\/admin$/);
-  await expect(page.getByRole("heading", { name: "Client video reviews" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Client reviews" })).toBeVisible();
+});
+
+test("browser: old hash video links are replaced with clean public paths", async ({ page }) => {
+  await page.route("**/api/public/share/video_token", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        kind: "video",
+        snapshot: {
+          project: {
+            clientName: shareProjectFixture.clientName,
+            id: shareProjectFixture.id,
+            name: shareProjectFixture.name,
+            shareSlug: shareProjectFixture.shareSlug,
+          },
+          video: shareProjectFixture.videos[0],
+        },
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.goto("/#/video/video_token");
+
+  await expect(page).toHaveURL(/\/video\/video_token$/);
+  await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
 });
 
 test("browser: share page opens an encoded project and records timestamped feedback", async ({

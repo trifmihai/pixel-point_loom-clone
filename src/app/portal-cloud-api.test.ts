@@ -263,6 +263,7 @@ describe("portal cloud API", () => {
     expect(createLink.status).toBe(200);
     expect(linkBody.url).toBe("https://portal.example/video/token_1");
     expect(linkBody.url).not.toContain("data=");
+    expect(linkBody.url).not.toContain("#");
     expect(publicResponse.status).toBe(200);
     expect(publicBody.kind).toBe("video");
     expect(publicBody.snapshot.video.id).toBe("video_1");
@@ -295,6 +296,8 @@ describe("portal cloud API", () => {
     const publicBody = await json<{ kind: "share"; project: PortalProject }>(publicResponse);
 
     expect(linkBody.url).toBe("https://portal.example/share/token_1");
+    expect(linkBody.url).not.toContain("#");
+    expect(linkBody.url).not.toContain("data=");
     expect(publicResponse.status).toBe(200);
     expect(publicBody.kind).toBe("share");
     expect(publicBody.project.videos).toHaveLength(1);

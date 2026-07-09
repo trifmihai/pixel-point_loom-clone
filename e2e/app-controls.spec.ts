@@ -9,13 +9,14 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
 
+  await page.getByRole("button", { name: "New project" }).first().click();
   await page.getByLabel("Project name").fill("Website walkthrough");
   await page.getByLabel("Client name").fill("Acme");
   await page.getByLabel("Project description").fill("Design review videos");
   await page.getByRole("button", { name: "Create project" }).click();
 
   await expect(page.getByRole("heading", { name: "Website walkthrough" })).toBeVisible();
-  await expect(page.getByText("0 videos")).toBeVisible();
+  await expect(page.getByText("0 videos").first()).toBeVisible();
   await expect(
     page.getByText(
       "This is a local-only link. Deploy to Cloudflare Pages and set the public app URL before sending to clients.",
@@ -23,10 +24,11 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   ).toBeVisible();
   await expect(
     page.getByText(
-      "Anyone with this link can view the shared video page. Do not include sensitive information in titles, descriptions, or URL data unless Gumlet access is restricted.",
+      "Anyone with a token link can view the shared client page. Keep sensitive context out of titles and descriptions unless Gumlet access is restricted.",
     ),
   ).toBeVisible();
 
+  await page.getByRole("button", { name: "Add Gumlet video" }).first().click();
   await page
     .getByLabel("Gumlet URL or asset ID")
     .fill("https://video.gumlet.io/workspace/gumlet-asset-123/main.mp4");
@@ -73,8 +75,8 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   await page.getByLabel("Edit Gumlet URL or asset ID").fill("https://gumlet.tv/watch/gumlet-asset-456");
   await page.getByRole("button", { name: "Save video" }).click();
 
-  await expect(page.getByText("Duration will be detected from Gumlet when available.")).toBeVisible();
-  await expect(page.getByText("12:00 source length")).toBeHidden();
+  await expect(page.getByText("Detect duration").first()).toBeVisible();
+  await expect(page.getByText("12:00 source")).toBeHidden();
 
   await page.getByRole("button", { name: "Video actions for Hero walkthrough" }).click();
   await page.getByRole("menuitem", { name: "Refresh duration" }).click();
@@ -93,7 +95,7 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
       }),
     );
   });
-  await expect(page.getByText("3:04 source length")).toBeVisible();
+  await expect(page.getByText("3:04 source")).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate((key) => {
@@ -104,6 +106,7 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
     )
     .toBe(184);
 
+  await page.getByRole("button", { name: "Add Gumlet video" }).first().click();
   await page.getByLabel("Gumlet URL or asset ID").fill("gumlet-asset-789");
   await page.getByLabel("Video title").fill("Footer review");
   await page.getByLabel("Recommended speed").click();
@@ -117,13 +120,13 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   await expect(page.getByRole("alertdialog", { name: "Delete this video from the project?" })).toBeVisible();
   await page.getByRole("button", { name: "Delete video" }).click();
 
-  await expect(page.getByText("1 videos")).toBeVisible();
+  await expect(page.getByText("1 videos").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Hero walkthrough" })).toBeHidden();
   await expect(page.getByRole("heading", { name: "Footer review" })).toBeVisible();
 
   await page.getByRole("button", { name: "Video actions for Footer review" }).click();
   await page.getByRole("menuitem", { name: "Delete video" }).click();
   await page.getByRole("button", { name: "Delete video" }).click();
-  await expect(page.getByText("0 videos")).toBeVisible();
+  await expect(page.getByText("0 videos").first()).toBeVisible();
   await expect(page.getByText("Add a Gumlet video to preview it here.")).toBeVisible();
 });

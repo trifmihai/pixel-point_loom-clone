@@ -165,6 +165,20 @@ export function createShareUrl(project: PortalProject, origin: string): string {
   return url.toString();
 }
 
+export function sanitizePublicPortalUrl(value: string): string {
+  return value.replace(/\/?#\/(video|share)\//g, "/$1/");
+}
+
+export function getPublicHashRedirectPath(hash: string): string | null {
+  const match = hash.match(/^#\/(video|share)\/(.+)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return `/${match[1]}/${match[2]}`;
+}
+
 export function normalizePublicAppUrl(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? "";
 
