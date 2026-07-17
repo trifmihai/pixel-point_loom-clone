@@ -15,7 +15,20 @@ import {
 import { GumletPlayer, type GumletPlayerHandle } from "./gumlet-player";
 import { getPortalApiErrorMessage, portalApi, type PublicShareResponse } from "./portal-api";
 import { loadPortalData, savePortalData, updateVideo } from "./portal-store";
-import type { PortalProject, PortalVideo, VideoShareSnapshot } from "./portal-types";
+import type {
+  PlaybackSpeed,
+  PortalProject,
+  PortalVideo,
+  VideoShareSnapshot,
+} from "./portal-types";
+import {
+  PlaybackSpeedControl,
+  PortalBrand,
+  PortalPageHeader,
+  PortalStateCard,
+  PortalStatus,
+  TimeSavingsSummary,
+} from "./portal-ui";
 import { SharePasscodeGate } from "./share-passcode-gate";
 import {
   calculatePlaybackSavings,
@@ -115,10 +128,14 @@ function getSnapshotFromPublicResponse(response: PublicShareResponse): VideoShar
   return null;
 }
 
-function getDurationMeta(video: PortalVideo, durationSeconds: number | undefined): string {
+function getDurationMeta(
+  video: PortalVideo,
+  durationSeconds: number | undefined,
+  playbackSpeed: PlaybackSpeed,
+): string {
   const pieces = [
     durationSeconds ? `${formatDuration(durationSeconds)} video` : null,
-    `${video.recommendedPlaybackSpeed}x playback`,
+    `${playbackSpeed}x playback`,
   ].filter(Boolean);
 
   return pieces.join(" - ");
@@ -177,6 +194,9 @@ export function VideoSharePortal({
   const [metadataDurationSeconds, setMetadataDurationSeconds] = React.useState<
     number | undefined
   >();
+  const [viewerSpeed, setViewerSpeed] = React.useState<PlaybackSpeed>(
+    () => snapshot?.video.recommendedPlaybackSpeed ?? 1.5,
+  );
   const gumletPlayerRef = React.useRef<GumletPlayerHandle | null>(null);
   const gumletAttemptRef = React.useRef<GumletPlaybackAttempt>({
     active: false,
@@ -189,9 +209,15 @@ export function VideoSharePortal({
   const nativeVideoRef = React.useRef<HTMLVideoElement | null>(null);
   const video = snapshot?.video ?? null;
   const project = snapshot?.project ?? null;
+  const playbackVideo = video
+    ? {
+        ...video,
+        recommendedPlaybackSpeed: viewerSpeed,
+      }
+    : null;
   const effectiveDurationSeconds = video?.durationSeconds ?? metadataDurationSeconds;
   const playbackSavings = video
-    ? calculatePlaybackSavings(effectiveDurationSeconds, video.recommendedPlaybackSpeed)
+    ? calculatePlaybackSavings(effectiveDurationSeconds, viewerSpeed)
     : null;
   const savedTimeLabel =
     playbackSavings && playbackSavings.savedSeconds > 0
@@ -308,6 +334,7 @@ export function VideoSharePortal({
       volumeConfirmed: false,
     };
     clearGumletFallbackTimer();
+    setViewerSpeed(video?.recommendedPlaybackSpeed ?? 1.5);
   }, [clearGumletFallbackTimer, video?.assetId, video?.directVideoUrl, video?.id]);
 
   React.useEffect(() => {
@@ -334,8 +361,8 @@ export function VideoSharePortal({
       return;
     }
 
-    player.defaultPlaybackRate = video.recommendedPlaybackSpeed;
-    player.playbackRate = video.recommendedPlaybackSpeed;
+    player.defaultPlaybackRate = viewerSpeed;
+    player.playbackRate = viewerSpeed;
 
     if (options?.audible) {
       player.defaultMuted = false;
@@ -350,7 +377,7 @@ export function VideoSharePortal({
         // Some browsers reject seeking before metadata is ready; loadedmetadata retries this.
       }
     }
-  }, [video]);
+  }, [video, viewerSpeed]);
 
   React.useEffect(() => {
     applyNativePlaybackSettings();
@@ -379,7 +406,7 @@ export function VideoSharePortal({
       speedConfirmed:
         gumletAttemptRef.current.speedConfirmed ||
         (message.playbackRate !== undefined &&
-          Math.abs(message.playbackRate - video.recommendedPlaybackSpeed) < 0.01),
+          Math.abs(message.playbackRate - viewerSpeed) < 0.01),
       unmutedConfirmed:
         gumletAttemptRef.current.unmutedConfirmed || message.muted === false,
       volumeConfirmed:
@@ -396,7 +423,7 @@ export function VideoSharePortal({
       (nextAttempt.unmutedConfirmed || nextAttempt.volumeConfirmed)
     ) {
       setGumletPlaybackStatus(
-        `Playback confirmed at ${video.recommendedPlaybackSpeed}x with sound on.`,
+        `Playback confirmed at ${viewerSpeed}x with sound on.`,
       );
       return;
     }
@@ -415,8 +442,8 @@ export function VideoSharePortal({
       setGumletStartPending(false);
       setGumletPlaybackStatus(
         nextAttempt.unmutedConfirmed || nextAttempt.volumeConfirmed
-          ? `Playback confirmed at ${video.recommendedPlaybackSpeed}x with sound on.`
-          : `Playback confirmed at ${video.recommendedPlaybackSpeed}x. Sound was requested at full volume.`,
+          ? `Playback confirmed at ${viewerSpeed}x with sound on.`
+          : `Playback confirmed at ${viewerSpeed}x. Sound was requested at full volume.`,
       );
     }
   }
@@ -434,7 +461,7 @@ export function VideoSharePortal({
       clearGumletFallbackTimer();
       setGumletStartPending(true);
       setGumletPlaybackStatus(
-        `Attempting to start playback at ${video.recommendedPlaybackSpeed}x with sound.`,
+        `Attempting to start playback at ${viewerSpeed}x with sound.`,
       );
       gumletAttemptRef.current = {
         active: true,
@@ -455,7 +482,7 @@ export function VideoSharePortal({
         };
         setGumletStartPending(false);
         setGumletPlaybackStatus(
-          getGumletPlaybackFallbackMessage(video.recommendedPlaybackSpeed),
+        getGumletPlaybackFallbackMessage(viewerSpeed),
         );
       }, gumletPlaybackFallbackTimeoutMs);
       return;
@@ -499,22 +526,12 @@ export function VideoSharePortal({
 
   if (tokenStatus === "loading") {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
-        <Card className="w-full max-w-lg">
-          <CardHeader>
-            <CardTitle aria-level={1} className="text-2xl" role="heading">
-              Loading video link
-            </CardTitle>
-            <CardDescription className="text-sm leading-6">
-              Checking this secure video token.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="aspect-video animate-pulse rounded-lg bg-white/10" />
-            <div className="h-3 w-2/3 animate-pulse rounded bg-white/10" />
-            <div className="h-3 w-1/2 animate-pulse rounded bg-white/10" />
-          </CardContent>
-        </Card>
+      <main className="portal-shell flex items-center justify-center px-4 py-8">
+        <PortalStateCard
+          description="Checking this secure video token."
+          loading
+          title="Loading video…"
+        />
       </main>
     );
   }
@@ -535,81 +552,106 @@ export function VideoSharePortal({
 
   if (!video || !project) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
-        <Card className="w-full max-w-md text-center">
-          <CardHeader>
-            <CardTitle aria-level={1} className="text-2xl" role="heading">
-              This video link is not available
-            </CardTitle>
-            <CardDescription className="text-sm leading-6">
-              {tokenError ||
-                "The link may have expired, been mistyped, or no longer point to a shared video."}
-            </CardDescription>
-          </CardHeader>
-        </Card>
+      <main className="portal-shell flex items-center justify-center px-4 py-8">
+        <PortalStateCard
+          description={
+            tokenError ||
+            "The link may have expired, been mistyped, or no longer point to a shared video. Ask the sender for the current link."
+          }
+          title="This video link is not available"
+          tone="error"
+        />
       </main>
     );
   }
 
   return (
-    <main className="min-h-dvh bg-[color:var(--background)] text-[color:var(--foreground)]">
+    <main className="portal-shell">
+      <a className="portal-skip-link" href="#video-player">
+        Skip to video
+      </a>
       <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5 px-4 py-4 sm:py-6 lg:px-6">
-        <header className="rounded-xl border border-white/10 bg-[color:color-mix(in_oklab,var(--card)_88%,transparent)] p-4 sm:p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0 space-y-2">
-              <Badge className="w-fit" variant="emphasisOutline">
-              {project.clientName || "Client review"}
-              </Badge>
-              <h1 className="break-words text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-                {video.title}
-              </h1>
-              <p className="text-sm leading-6 text-[color:var(--muted-foreground)]">
-                {project.name}
-              </p>
-            </div>
-            <Badge className="w-fit gap-2 px-3 py-2 text-sm" variant="secondary">
-              <Gauge className="size-4" />
-              Suggested {video.recommendedPlaybackSpeed}x
-            </Badge>
-          </div>
-        </header>
+        <div className="flex items-center justify-between px-1 py-1">
+          <PortalBrand context="Client video portal" />
+          <Badge variant="mutedOutline">Shared video</Badge>
+        </div>
 
-        <section className="relative min-w-0 overflow-hidden rounded-xl border border-white/10 bg-black shadow-2xl shadow-black/30">
-          {video.directVideoUrl ? (
-            <video
-              ref={nativeVideoRef}
-              className="aspect-video w-full bg-black"
-              controls
-              onLoadedMetadata={handleNativeMetadata}
-              onPlay={() => applyNativePlaybackSettings({ audible: true })}
-              poster={video.thumbnailUrl}
-              playsInline
-              preload="metadata"
-              src={video.directVideoUrl}
-              title={`${video.title} video`}
-            />
-          ) : (
-            <GumletPlayer
-              ref={gumletPlayerRef}
-              onDuration={handleResolvedDuration}
-              onPlaybackEvent={handleGumletPlaybackEvent}
-              video={video}
-            />
-          )}
+        <PortalPageHeader
+          actions={
+            <div className="min-w-[15rem] rounded-xl border border-[color:var(--portal-border)] bg-black/10 p-3">
+              <PlaybackSpeedControl
+                onChange={setViewerSpeed}
+                recommendedSpeed={video.recommendedPlaybackSpeed}
+                value={viewerSpeed}
+              />
+            </div>
+          }
+          description={project.name}
+          eyebrow={
+            <Badge className="w-fit" variant="emphasisOutline">
+              {project.clientName || "Client review"}
+            </Badge>
+          }
+          metadata={
+            <>
+              <Badge className="gap-2" variant="secondary">
+                <Gauge aria-hidden="true" className="size-4" />
+                Recommended {video.recommendedPlaybackSpeed}x
+              </Badge>
+              <TimeSavingsSummary
+                compact
+                durationSeconds={effectiveDurationSeconds}
+                speed={viewerSpeed}
+              />
+            </>
+          }
+          title={video.title}
+        />
+
+        <div className="relative" id="video-player">
+          <section
+            className="min-w-0 overflow-hidden rounded-xl border border-[color:var(--portal-border-strong)] bg-black shadow-2xl shadow-black/30"
+            data-testid="video-player-frame"
+          >
+            {video.directVideoUrl ? (
+              <video
+                ref={nativeVideoRef}
+                className="aspect-video w-full bg-black"
+                controls
+                onLoadedMetadata={handleNativeMetadata}
+                onPlay={() => applyNativePlaybackSettings({ audible: true })}
+                poster={video.thumbnailUrl}
+                playsInline
+                preload="metadata"
+                src={video.directVideoUrl}
+                title={`${video.title} video`}
+              />
+            ) : playbackVideo ? (
+              <GumletPlayer
+                ref={gumletPlayerRef}
+                onDuration={handleResolvedDuration}
+                onPlaybackEvent={handleGumletPlaybackEvent}
+                video={playbackVideo}
+              />
+            ) : null}
+          </section>
 
           {!started ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/45 px-3 sm:px-4">
-              <div className="w-full max-w-md rounded-xl border border-sky-400/40 bg-black/75 p-4 text-center shadow-2xl backdrop-blur sm:p-5">
+            <div
+              className="mt-3 flex items-center justify-center sm:absolute sm:inset-0 sm:mt-0 sm:bg-black/50 sm:px-4"
+              data-testid="review-start-panel"
+            >
+              <div className="w-full max-w-md rounded-xl border border-blue-300/30 bg-[color:var(--portal-surface-1)] p-4 text-center shadow-2xl sm:bg-[color:color-mix(in_oklab,var(--portal-surface-1)_88%,transparent)] sm:p-5 sm:backdrop-blur-md">
                 <div className="flex flex-col items-center gap-3">
                   <Badge className="gap-2" variant="secondary">
-                    <Gauge className="size-4" />
-                    {video.recommendedPlaybackSpeed}x review
+                    <Gauge aria-hidden="true" className="size-4" />
+                    {viewerSpeed}x review
                   </Badge>
                   <h2 className="text-xl font-semibold text-white">Start faster review</h2>
                   <div className="space-y-2 text-sm text-[color:var(--muted-foreground)]">
                     {watchTimeLabel ? (
                       <span className="flex items-center justify-center gap-2">
-                        <Clock3 className="size-4" />
+                        <Clock3 aria-hidden="true" className="size-4" />
                         {watchTimeLabel}
                       </span>
                     ) : null}
@@ -619,7 +661,7 @@ export function VideoSharePortal({
                     ) : null}
                     {gumletStartPending ? (
                       <span className="block">
-                        Attempting to start playback at {video.recommendedPlaybackSpeed}x.
+                        Attempting to start playback at {viewerSpeed}x.
                       </span>
                     ) : null}
                   </div>
@@ -628,7 +670,7 @@ export function VideoSharePortal({
                     <span className="flex min-w-0 flex-col items-start gap-1 text-left">
                       <span>
                         {gumletStartPending ? "Starting" : "Start"}{" "}
-                        {video.recommendedPlaybackSpeed}x review
+                        {viewerSpeed}x review
                       </span>
                       {playbackSavings && playbackSavings.savedSeconds > 0 ? (
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium">
@@ -649,20 +691,18 @@ export function VideoSharePortal({
               </div>
             </div>
           ) : null}
-        </section>
+        </div>
 
-        {gumletPlaybackStatus ? (
-          <Badge className="w-fit gap-2 px-3 py-2 text-sm" variant="secondary">
-            <Gauge className="size-4" />
-            {gumletPlaybackStatus}
-          </Badge>
-        ) : null}
+        <PortalStatus
+          message={gumletPlaybackStatus}
+          tone={gumletPlaybackStatus.startsWith("Playback confirmed") ? "success" : "default"}
+        />
 
-        <Card>
+        <Card className="border-[color:var(--portal-border)]">
           <CardHeader>
             <CardTitle className="text-xl">Review details</CardTitle>
             <CardDescription className="text-sm">
-              {getDurationMeta(video, effectiveDurationSeconds)}
+              {getDurationMeta(video, effectiveDurationSeconds, viewerSpeed)}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm leading-6 text-[color:var(--muted-foreground)]">

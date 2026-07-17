@@ -25,12 +25,20 @@ import { GumletPlayer } from "./gumlet-player";
 import { getPortalApiErrorMessage, portalApi, type PublicShareResponse } from "./portal-api";
 import { loadPortalData } from "./portal-store";
 import type {
+  PlaybackSpeed,
   PortalComment,
   PortalProject,
   PortalVideo,
   VideoShareSnapshot,
   ViewingProgressStatus,
 } from "./portal-types";
+import {
+  PlaybackSpeedControl,
+  PortalBrand,
+  PortalPageHeader,
+  PortalStateCard,
+  TimeSavingsSummary,
+} from "./portal-ui";
 import { SharePasscodeGate } from "./share-passcode-gate";
 import {
   decodeShareProject,
@@ -206,6 +214,15 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
 
   const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? videos[0] ?? null;
   const selectedComments = comments.filter((comment) => comment.videoId === selectedVideo?.id);
+  const [viewerSpeed, setViewerSpeed] = React.useState<PlaybackSpeed>(
+    () => selectedVideo?.recommendedPlaybackSpeed ?? 1.5,
+  );
+  const playbackVideo = selectedVideo
+    ? {
+        ...selectedVideo,
+        recommendedPlaybackSpeed: viewerSpeed,
+      }
+    : null;
 
   React.useEffect(() => {
     const legacyProject = loadProject(slug, encodedData);
@@ -301,6 +318,10 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
   }, [project, selectedVideo]);
 
   React.useEffect(() => {
+    setViewerSpeed(selectedVideo?.recommendedPlaybackSpeed ?? 1.5);
+  }, [selectedVideo?.id, selectedVideo?.recommendedPlaybackSpeed]);
+
+  React.useEffect(() => {
     if (!project) {
       return;
     }
@@ -366,17 +387,12 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
 
   if (tokenStatus === "loading") {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
-        <Card className="max-w-md text-center">
-          <CardHeader>
-            <CardTitle aria-level={1} className="text-2xl" role="heading">
-              Loading review link
-            </CardTitle>
-            <CardDescription className="text-sm leading-6">
-              Checking this secure share token.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+      <main className="portal-shell flex items-center justify-center px-4 py-8">
+        <PortalStateCard
+          description="Checking this secure project token."
+          loading
+          title="Loading review…"
+        />
       </main>
     );
   }
@@ -397,89 +413,157 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
 
   if (!project) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
-        <Card className="max-w-md text-center">
-          <CardHeader>
-            <CardTitle aria-level={1} className="text-2xl" role="heading">
-              Share link not found
-            </CardTitle>
-            <CardDescription className="text-sm leading-6">
-              {tokenError ||
-                "This link does not include a project snapshot, and no local project matches this slug."}
-            </CardDescription>
-          </CardHeader>
-        </Card>
+      <main className="portal-shell flex items-center justify-center px-4 py-8">
+        <PortalStateCard
+          description={
+            tokenError ||
+            "The link may have expired, been mistyped, or no longer point to a shared project. Ask the sender for the current link."
+          }
+          title="This project link is not available"
+          tone="error"
+        />
       </main>
     );
   }
 
+  const videoList = videos.map((video) => (
+    <Button
+      aria-current={selectedVideo?.id === video.id ? "true" : undefined}
+      className={`!h-auto w-full justify-start whitespace-normal px-3 py-3 text-left ${
+        selectedVideo?.id === video.id
+          ? "border-blue-400/60 bg-blue-400/10 text-white"
+          : "text-white"
+      }`}
+      key={video.id}
+      onClick={() => {
+        setSelectedVideoId(video.id);
+        setSeekSeconds(undefined);
+      }}
+      type="button"
+      variant="outline"
+    >
+      <span className="flex min-w-0 flex-col items-start gap-2">
+        <span className="font-medium">{video.title}</span>
+        <span className="portal-numeric text-xs text-[color:var(--muted-foreground)]">
+          {getVideoMeta(video)}
+        </span>
+        <Badge variant={getStatusVariant(progress[video.id])}>
+          {getStatusLabel(progress[video.id])}
+        </Badge>
+      </span>
+    </Button>
+  ));
+
   return (
-    <main className="min-h-dvh bg-[color:var(--background)] text-[color:var(--foreground)]">
-      <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-5 px-4 py-5 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:px-6">
-        <section className="min-w-0 space-y-4">
+    <main className="portal-shell">
+      <a className="portal-skip-link" href="#collection-player">
+        Skip to video
+      </a>
+      <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-5 px-4 py-4 sm:py-6 lg:px-6">
+        <div className="flex items-center justify-between px-1 py-1">
+          <PortalBrand context="Client project portal" />
+          <Badge variant="mutedOutline">Shared project</Badge>
+        </div>
+
+        <PortalPageHeader
+          description={project.description}
+          eyebrow={
+            <Badge className="w-fit" variant="emphasisOutline">
+              {project.clientName || "Client review"}
+            </Badge>
+          }
+          metadata={
+            <span className="portal-numeric">
+              {videos.length} {videos.length === 1 ? "video" : "videos"} in this review
+            </span>
+          }
+          title={project.name}
+        />
+
+        <nav aria-label="Video collection" className="lg:hidden">
           <Card>
             <CardHeader>
-              <Badge className="w-fit" variant="emphasisOutline">
-                {project.clientName || "Client review"}
-              </Badge>
-              <CardTitle aria-level={1} className="text-3xl font-semibold" role="heading">
-                {project.name}
-              </CardTitle>
-              {project.description ? (
-                <CardDescription className="max-w-3xl text-sm leading-6">
-                  {project.description}
-                </CardDescription>
-              ) : null}
+              <CardTitle className="text-base">Choose a video</CardTitle>
+              <CardDescription>Review progress stays on this device.</CardDescription>
             </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">{videoList}</CardContent>
           </Card>
+        </nav>
 
-          {selectedVideo ? (
-            <>
-              <GumletPlayer seekSeconds={seekSeconds} video={selectedVideo} />
-              <Card>
-                <CardHeader className="gap-3 md:grid-cols-[1fr_auto]">
-                  <div>
-                    <CardTitle aria-level={2} className="text-2xl" role="heading">
-                      {selectedVideo.title}
-                    </CardTitle>
-                    <CardDescription className="text-sm">
-                      {getVideoMeta(selectedVideo)}
+        <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+          <section className="min-w-0 space-y-4">
+            {selectedVideo && playbackVideo ? (
+              <>
+                <div data-testid="collection-player" id="collection-player">
+                  <GumletPlayer seekSeconds={seekSeconds} video={playbackVideo} />
+                </div>
+                <Card>
+                  <CardHeader className="gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+                    <div>
+                      <CardTitle aria-level={2} className="text-2xl" role="heading">
+                        {selectedVideo.title}
+                      </CardTitle>
+                      <CardDescription className="mt-1 text-sm">
+                        {getVideoMeta(selectedVideo)}
+                      </CardDescription>
+                      <div className="mt-3">
+                        <TimeSavingsSummary
+                          durationSeconds={selectedVideo.durationSeconds}
+                          speed={viewerSpeed}
+                        />
+                      </div>
+                      {selectedVideo.description ? (
+                        <p className="mt-3 text-sm leading-6 text-[color:var(--muted-foreground)]">
+                          {selectedVideo.description}
+                        </p>
+                      ) : null}
+                    </div>
+                    <CardAction className="static col-auto row-auto flex w-full flex-col items-stretch gap-3 md:w-64 md:justify-self-end">
+                      <div className="rounded-xl border border-[color:var(--portal-border)] bg-black/10 p-3">
+                        <PlaybackSpeedControl
+                          onChange={setViewerSpeed}
+                          recommendedSpeed={selectedVideo.recommendedPlaybackSpeed}
+                          value={viewerSpeed}
+                        />
+                      </div>
+                      <Button
+                        onClick={() =>
+                          setProgress((current) => ({
+                            ...current,
+                            [selectedVideo.id]: "watched",
+                          }))
+                        }
+                        size="lg"
+                        type="button"
+                        variant="outline"
+                      >
+                        <CheckCircle2 />
+                        Mark watched
+                      </Button>
+                    </CardAction>
+                  </CardHeader>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Notes on this device</CardTitle>
+                    <CardDescription id="feedback-storage-note" className="leading-6">
+                      Add timestamped review notes. These notes stay in this browser and are not
+                      sent to the administrator.
                     </CardDescription>
-                    {selectedVideo.description ? (
-                      <p className="mt-3 text-sm leading-6 text-[color:var(--muted-foreground)]">
-                        {selectedVideo.description}
-                      </p>
-                    ) : null}
-                  </div>
-                  <CardAction className="static col-auto row-auto justify-self-start md:justify-self-end">
-                    <Button
-                      onClick={() =>
-                        setProgress((current) => ({
-                          ...current,
-                          [selectedVideo.id]: "watched",
-                        }))
-                      }
-                      size="lg"
-                      type="button"
-                      variant="outline"
+                  </CardHeader>
+                  <CardContent>
+                    <form
+                      aria-describedby="feedback-storage-note"
+                      className="grid gap-3 md:grid-cols-2"
+                      onSubmit={handleSubmitFeedback}
                     >
-                      <CheckCircle2 />
-                      Mark watched
-                    </Button>
-                  </CardAction>
-                </CardHeader>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Feedback</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <form className="grid gap-3 md:grid-cols-2" onSubmit={handleSubmitFeedback}>
                     <Field>
                       <FieldLabel htmlFor="feedback-author-name">Your name</FieldLabel>
                       <Input
+                        autoComplete="name"
                         id="feedback-author-name"
+                        name="name"
                         onChange={(event) =>
                           setFeedbackDraft((draft) => ({
                             ...draft,
@@ -494,7 +578,9 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
                     <Field>
                       <FieldLabel htmlFor="feedback-author-email">Email</FieldLabel>
                       <Input
+                        autoComplete="email"
                         id="feedback-author-email"
+                        name="email"
                         onChange={(event) =>
                           setFeedbackDraft((draft) => ({
                             ...draft,
@@ -511,6 +597,8 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
                       <Input
                         id="feedback-timestamp"
                         inputMode="numeric"
+                        min="0"
+                        name="timestamp"
                         onChange={(event) =>
                           setFeedbackDraft((draft) => ({
                             ...draft,
@@ -518,6 +606,8 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
                           }))
                         }
                         size="lg"
+                        step="1"
+                        type="number"
                         value={feedbackDraft.timestampSeconds}
                       />
                     </Field>
@@ -525,6 +615,7 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
                       <FieldLabel htmlFor="feedback-comment">Feedback</FieldLabel>
                       <Textarea
                         id="feedback-comment"
+                        name="feedback"
                         onChange={(event) =>
                           setFeedbackDraft((draft) => ({
                             ...draft,
@@ -533,6 +624,7 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
                         }
                         required
                         size="xl"
+                        spellCheck
                         value={feedbackDraft.commentText}
                       />
                     </Field>
@@ -540,11 +632,11 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
                       <MessageSquarePlus />
                       Add comment at current time
                     </Button>
-                  </form>
+                    </form>
 
-                  <Separator className="my-4" />
+                    <Separator className="my-4" />
 
-                  <div className="space-y-3">
+                    <div className="space-y-3">
                     {selectedComments.length > 0 ? (
                       selectedComments.map((comment) => (
                         <Card key={comment.id} size="sm">
@@ -576,53 +668,30 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
                         </EmptyHeader>
                       </Empty>
                     )}
-                  </div>
-                </CardContent>
-              </Card>
-            </>
-          ) : (
-            <Empty className="min-h-[320px]" variant="outline">
-              <EmptyHeader>
-                <EmptyTitle>No videos available</EmptyTitle>
-                <EmptyDescription>No videos are available in this share link.</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          )}
-        </section>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            ) : (
+              <Empty className="min-h-[320px]" variant="outline">
+                <EmptyHeader>
+                  <EmptyTitle>No videos available</EmptyTitle>
+                  <EmptyDescription>No videos are available in this share link.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )}
+          </section>
 
-        <Card className="h-fit lg:sticky lg:top-5">
-          <CardHeader>
-            <CardTitle className="text-lg">Videos</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {videos.map((video) => (
-              <Button
-                className={`!h-auto w-full justify-start whitespace-normal px-3 py-3 text-left ${
-                  selectedVideo?.id === video.id
-                    ? "border-emerald-400/60 bg-emerald-400/10 text-white"
-                    : "text-white"
-                }`}
-                key={video.id}
-                onClick={() => {
-                  setSelectedVideoId(video.id);
-                  setSeekSeconds(undefined);
-                }}
-                type="button"
-                variant="outline"
-              >
-                <span className="flex min-w-0 flex-col items-start gap-2">
-                  <span className="font-medium">{video.title}</span>
-                  <span className="text-xs text-[color:var(--muted-foreground)]">
-                    {getVideoMeta(video)}
-                  </span>
-                  <Badge variant={getStatusVariant(progress[video.id])}>
-                    {getStatusLabel(progress[video.id])}
-                  </Badge>
-                </span>
-              </Button>
-            ))}
-          </CardContent>
-        </Card>
+          <nav aria-label="Video collection" className="hidden lg:block lg:sticky lg:top-5">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Videos</CardTitle>
+                <CardDescription>Choose the next item in this review.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">{videoList}</CardContent>
+            </Card>
+          </nav>
+        </div>
       </div>
     </main>
   );

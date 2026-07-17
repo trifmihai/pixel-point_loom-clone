@@ -2,6 +2,59 @@ import { expect, test } from "@playwright/test";
 
 import { portalStorageKey } from "../src/app/portal-store";
 
+const adminProjectFixture = {
+  clientName: "Raluca Stoinea",
+  createdAt: "2026-07-08T00:00:00.000Z",
+  description: "Website review and implementation notes.",
+  id: "project_admin_responsive",
+  name: "TSA Law",
+  shareSlug: "tsa-law-existing",
+  updatedAt: "2026-07-17T13:10:00.000Z",
+  videos: [],
+  visibility: "unlisted",
+};
+
+test("browser: admin uses the Pixel Point workspace and intentional mobile project navigation", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.goto("/admin");
+  await page.evaluate(
+    ({ key, project }) =>
+      window.localStorage.setItem(key, JSON.stringify({ projects: [project] })),
+    { key: portalStorageKey, project: adminProjectFixture },
+  );
+  await page.reload();
+
+  await expect(page.locator("span:visible", { hasText: "Pixel Point" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open projects" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Share project" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Project settings" })).toBeVisible();
+  await expect(page.locator("aside").filter({ hasText: "Projects" })).toBeHidden();
+
+  await page.getByRole("button", { name: "Open projects" }).click();
+  await expect(page.getByRole("dialog", { name: "Projects" })).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(360);
+
+  await page.getByRole("button", { name: "Share project" }).click();
+  await expect(page.getByRole("dialog", { name: "Share TSA Law" })).toBeVisible();
+  await expect(page.getByLabel("Share URL")).toHaveValue(/\/share\/tsa-law-existing/);
+  await page.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "Project settings" }).click();
+  await expect(page.getByRole("dialog", { name: "Project settings" })).toBeVisible();
+  await page.getByRole("button", { name: "Delete project" }).click();
+  await expect(
+    page.getByRole("alertdialog", { name: "Delete TSA Law?" }),
+  ).toBeVisible();
+  await expect(page.getByText(/active client links.*stop working/i)).toBeVisible();
+});
+
 test("browser: admin creates a project, adds a Gumlet video, and exposes a share link", async ({
   page,
 }) => {
@@ -47,17 +100,21 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
     /https:\/\/play\.gumlet\.io\/embed\/gumlet-asset-123\?background=false&autoplay=false&loop=false&disable_player_controls=false&t=30/,
   );
 
-  await page.getByRole("button", { name: "Copy client link" }).click();
+  await page.getByRole("button", { name: "Share project" }).click();
+  await expect(page.getByRole("dialog", { name: "Share Website walkthrough" })).toBeVisible();
   await expect(page.getByLabel("Share URL")).toHaveValue(
     /^http:\/\/localhost:\d+\/share\/website-walkthrough-/,
   );
-  await expect(page.getByText("Local-only share link ready")).toBeVisible();
+  await expect(page.getByText("Client link ready")).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
 
-  await page.getByRole("button", { name: "Copy video link" }).click();
+  await page.getByRole("button", { name: "Share video" }).click();
+  await expect(page.getByRole("dialog", { name: "Share Hero review" })).toBeVisible();
   await expect(page.getByLabel("Share URL")).toHaveValue(
     /^http:\/\/localhost:\d+\/video\/hero-review-/,
   );
-  await expect(page.getByText("Local-only video link ready")).toBeVisible();
+  await expect(page.getByText("Video link ready")).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
 
   await page.getByRole("button", { name: "Video actions for Hero review" }).click();
   await page.getByRole("menuitem", { name: "Edit video" }).click();
@@ -95,7 +152,7 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
       }),
     );
   });
-  await expect(page.getByText("3:04 source")).toBeVisible();
+  await expect(page.getByText("3:04 source").first()).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate((key) => {

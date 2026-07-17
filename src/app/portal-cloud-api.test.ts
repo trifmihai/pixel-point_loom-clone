@@ -5,6 +5,7 @@ import {
   handlePortalApiRequest,
   type PortalApiRuntime,
 } from "./portal-cloud-api";
+import type { CreateShareLinkResponse } from "./portal-api";
 import type { PortalData, PortalProject } from "./portal-types";
 
 const adminEmail = "trifmihai.business@gmail.com";
@@ -268,6 +269,76 @@ describe("portal cloud API", () => {
     expect(publicBody.kind).toBe("video");
     expect(publicBody.snapshot.video.id).toBe("video_1");
     expect(JSON.stringify(publicBody)).not.toContain("project_2");
+  });
+
+  it("reuses active project and video links instead of silently regenerating tokens", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+
+    const createLink = (videoId?: string) =>
+      handlePortalApiRequest(
+        createAdminRequest("/api/admin/share-links", sessionCookie, {
+          body: JSON.stringify({ projectId: "project_1", videoId }),
+          method: "POST",
+        }),
+        runtime,
+      );
+
+    const firstProject = await json<CreateShareLinkResponse>(await createLink());
+    const secondProject = await json<CreateShareLinkResponse>(await createLink());
+    const firstVideo = await json<CreateShareLinkResponse>(await createLink("video_1"));
+    const secondVideo = await json<CreateShareLinkResponse>(await createLink("video_1"));
+
+    expect(firstProject).toMatchObject({ reused: false, token: "token_1" });
+    expect(secondProject).toMatchObject({ reused: true, token: "token_1" });
+    expect(firstVideo).toMatchObject({ reused: false, token: "token_2" });
+    expect(secondVideo).toMatchObject({ reused: true, token: "token_2" });
+  });
+
+  it("matches reusable links by passcode and exact expiry semantics", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+
+    const createLink = (passcode: string, expiresAt?: string) =>
+      handlePortalApiRequest(
+        createAdminRequest("/api/admin/share-links", sessionCookie, {
+          body: JSON.stringify({ expiresAt, passcode, projectId: "project_1" }),
+          method: "POST",
+        }),
+        runtime,
+      );
+
+    const firstProtected = await json<CreateShareLinkResponse>(
+      await createLink("client-pass"),
+    );
+    const reusedProtected = await json<CreateShareLinkResponse>(
+      await createLink("client-pass"),
+    );
+    const differentPasscode = await json<CreateShareLinkResponse>(
+      await createLink("other-pass"),
+    );
+    const expiring = await json<CreateShareLinkResponse>(
+      await createLink("client-pass", "2026-07-10T09:00:00.000Z"),
+    );
+
+    expect(firstProtected).toMatchObject({ reused: false, token: "token_1" });
+    expect(reusedProtected).toMatchObject({ reused: true, token: "token_1" });
+    expect(differentPasscode).toMatchObject({ reused: false, token: "token_2" });
+    expect(expiring).toMatchObject({ reused: false, token: "token_3" });
   });
 
   it("loads public project tokens without localStorage data", async () => {

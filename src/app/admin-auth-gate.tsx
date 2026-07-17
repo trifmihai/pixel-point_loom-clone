@@ -20,6 +20,7 @@ import {
 
 import { getAppConfig } from "./app-config";
 import { getPortalApiErrorMessage, portalApi } from "./portal-api";
+import { PortalBrand } from "./portal-ui";
 
 type AdminAuthGateProps = {
   children: React.ReactNode;
@@ -105,12 +106,15 @@ export function AdminAuthGate({ children }: AdminAuthGateProps): React.JSX.Eleme
   }
 
   return (
-    <main className="min-h-screen bg-black px-4 py-6 text-white">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-md items-center">
-        <Card className="w-full">
+    <main className="portal-shell flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-md space-y-4">
+        <div className="px-1">
+          <PortalBrand context="Private review administration" />
+        </div>
+        <Card className="w-full border-[color:var(--portal-border-strong)] bg-[color:var(--portal-surface-1)] shadow-2xl shadow-black/25">
           <CardHeader>
             <Badge className="w-fit gap-2" variant="secondary">
-              <ShieldCheck className="size-4" />
+              <ShieldCheck aria-hidden="true" className="size-4" />
               Admin access
             </Badge>
             <CardTitle aria-level={1} className="text-2xl" role="heading">
@@ -122,9 +126,13 @@ export function AdminAuthGate({ children }: AdminAuthGateProps): React.JSX.Eleme
           </CardHeader>
           <CardContent>
             {authState === "checking" ? (
-              <div className="flex items-center gap-3 rounded-md border border-white/10 bg-black/10 p-3 text-sm text-[color:var(--muted-foreground)]">
-                <LockKeyhole className="size-4" />
-                Checking admin session.
+              <div
+                aria-live="polite"
+                className="flex items-center gap-3 rounded-xl border border-blue-300/15 bg-blue-400/5 p-3 text-sm text-[color:var(--muted-foreground)]"
+                role="status"
+              >
+                <LockKeyhole aria-hidden="true" className="size-4 text-blue-200" />
+                Checking admin session…
               </div>
             ) : (
               <form className="space-y-4" onSubmit={(event) => void handleLogin(event)}>
@@ -135,6 +143,7 @@ export function AdminAuthGate({ children }: AdminAuthGateProps): React.JSX.Eleme
                       autoComplete="current-password"
                       autoFocus
                       id="admin-password"
+                      name="password"
                       onChange={(event) => setPassword(event.target.value)}
                       required
                       size="lg"
@@ -150,8 +159,8 @@ export function AdminAuthGate({ children }: AdminAuthGateProps): React.JSX.Eleme
                   </Alert>
                 ) : null}
                 <Button disabled={submitting || !password} size="xl" type="submit">
-                  <LockKeyhole />
-                  {submitting ? "Signing in" : "Sign in"}
+                  <LockKeyhole aria-hidden="true" />
+                  {submitting ? "Signing in…" : "Sign in"}
                 </Button>
               </form>
             )}

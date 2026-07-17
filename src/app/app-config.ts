@@ -33,7 +33,7 @@ export function getAppConfig(currentOrigin = getCurrentOriginFallback()): AppCon
 
   return {
     adminEmail: getEnvValue("VITE_ADMIN_EMAIL")?.trim() || defaultAdminEmail,
-    appName: "Gumlet Client Video Portal",
+    appName: "Pixel Point Video Portal",
     cloudSyncEnabled,
     localMode,
     publicAppUrl,

@@ -29,8 +29,17 @@ export type PortalShareLinkRecord = {
   videoId?: string;
 };
 
+export type PortalShareLinkMatch = Pick<
+  PortalShareLinkRecord,
+  "expiresAt" | "passcodeHash" | "projectId" | "videoId"
+>;
+
 export type PortalCloudDatabase = {
   createShareLink(ownerEmail: string, record: PortalShareLinkRecord): Promise<PortalShareLinkRecord>;
+  findReusableShareLink(
+    ownerEmail: string,
+    match: PortalShareLinkMatch,
+  ): Promise<PortalShareLinkRecord | null>;
   getShareLink(token: string): Promise<(PortalShareLinkRecord & { ownerEmail: string }) | null>;
   listProjects(ownerEmail: string): Promise<PortalData>;
   replaceProjects(ownerEmail: string, data: PortalData): Promise<PortalData>;
@@ -672,14 +681,36 @@ async function handleAdminShareLinks(
       return errorResponse(404, "video_not_found", "Video not found.");
     }
 
+    const passcode = body.passcode?.trim();
+    const expiresAt = body.expiresAt?.trim() || undefined;
+    const passcodeHash = passcode ? await hashPasscode(passcode) : undefined;
+    const reusableRecord = await runtime.db.findReusableShareLink(ownerEmail, {
+      expiresAt,
+      passcodeHash,
+      projectId,
+      videoId,
+    });
+    const now = runtime.now?.() ?? new Date();
+
+    if (
+      reusableRecord &&
+      (!reusableRecord.expiresAt || new Date(reusableRecord.expiresAt).getTime() > now.getTime())
+    ) {
+      return jsonResponse({
+        kind: getShareKind(reusableRecord),
+        reused: true,
+        token: reusableRecord.token,
+        url: getPublicShareUrl(runtime, reusableRecord),
+      });
+    }
+
     const createdAt = getNowIso(runtime);
     const token = runtime.createToken?.() ?? createToken();
-    const passcode = body.passcode?.trim();
     const record = await runtime.db.createShareLink(ownerEmail, {
       createdAt,
-      expiresAt: body.expiresAt?.trim() || undefined,
+      expiresAt,
       id: createId("share"),
-      passcodeHash: passcode ? await hashPasscode(passcode) : undefined,
+      passcodeHash,
       projectId,
       revokedAt: undefined,
       token,
@@ -688,6 +719,7 @@ async function handleAdminShareLinks(
 
     return jsonResponse({
       kind: getShareKind(record),
+      reused: false,
       token: record.token,
       url: getPublicShareUrl(runtime, record),
     });
@@ -830,6 +862,26 @@ export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
     this.shareLinks.set(record.token, shareLink);
 
     return clone(record);
+  }
+
+  async findReusableShareLink(
+    ownerEmail: string,
+    match: PortalShareLinkMatch,
+  ): Promise<PortalShareLinkRecord | null> {
+    const normalizedOwner = normalizeAdminEmail(ownerEmail);
+    const record = Array.from(this.shareLinks.values())
+      .filter(
+        (candidate) =>
+          normalizeAdminEmail(candidate.ownerEmail) === normalizedOwner &&
+          candidate.projectId === match.projectId &&
+          candidate.videoId === match.videoId &&
+          candidate.passcodeHash === match.passcodeHash &&
+          candidate.expiresAt === match.expiresAt &&
+          !candidate.revokedAt,
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+
+    return record ? clone(record) : null;
   }
 
   async getShareLink(
@@ -994,6 +1046,42 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
       .run();
 
     return clone(record);
+  }
+
+  async findReusableShareLink(
+    ownerEmail: string,
+    match: PortalShareLinkMatch,
+  ): Promise<PortalShareLinkRecord | null> {
+    const videoId = match.videoId ?? null;
+    const passcodeHash = match.passcodeHash ?? null;
+    const expiresAt = match.expiresAt ?? null;
+    const row = await this.db
+      .prepare(
+        `SELECT share_links.*, projects.owner_email
+          FROM share_links
+          INNER JOIN projects ON projects.id = share_links.project_id
+          WHERE projects.owner_email = ?
+            AND share_links.project_id = ?
+            AND ((share_links.video_id IS NULL AND ? IS NULL) OR share_links.video_id = ?)
+            AND ((share_links.passcode_hash IS NULL AND ? IS NULL) OR share_links.passcode_hash = ?)
+            AND ((share_links.expires_at IS NULL AND ? IS NULL) OR share_links.expires_at = ?)
+            AND share_links.revoked_at IS NULL
+          ORDER BY share_links.created_at DESC
+          LIMIT 1`,
+      )
+      .bind(
+        ownerEmail,
+        match.projectId,
+        videoId,
+        videoId,
+        passcodeHash,
+        passcodeHash,
+        expiresAt,
+        expiresAt,
+      )
+      .first<ShareLinkRow>();
+
+    return row ? mapShareLinkRow(row) : null;
   }
 
   async getShareLink(

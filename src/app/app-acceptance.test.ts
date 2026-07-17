@@ -5,18 +5,20 @@ import { describe, expect, it } from "vitest";
 import { appAcceptance, appProductReadiness } from "./app-acceptance";
 
 describe("portal acceptance metadata", () => {
-  it("marks the generated starter as a real Gumlet portal product", () => {
+  it("marks the generated starter as the Pixel Point portal product", () => {
     expect(appProductReadiness).toMatchObject({
       mode: "product",
-      productName: "Gumlet Client Video Portal",
+      productName: "Pixel Point Video Portal",
     });
     expect(appProductReadiness.requestedBehavior).toContain("Gumlet asset IDs");
+    expect(appProductReadiness.requestedBehavior).toContain("stable project and video share links");
     expect(appAcceptance).toEqual(
       expect.arrayContaining([
         "admin creates projects",
         "admin adds Gumlet videos by asset ID",
         "share page embeds Gumlet videos",
-        "share page records timestamped feedback",
+        "share page records timestamped notes locally",
+        "public token and encoded fallback routes survive refresh",
       ]),
     );
   });

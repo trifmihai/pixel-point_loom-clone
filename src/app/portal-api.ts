@@ -15,6 +15,7 @@ export type CreateShareLinkInput = {
 
 export type CreateShareLinkResponse = {
   kind: "share" | "video";
+  reused: boolean;
   token: string;
   url: string;
 };

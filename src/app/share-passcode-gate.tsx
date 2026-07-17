@@ -13,6 +13,8 @@ import {
   Input,
 } from "@/toolcraft/ui";
 
+import { PortalBrand } from "./portal-ui";
+
 type SharePasscodeGateProps = {
   description: string;
   error?: string;
@@ -33,15 +35,24 @@ export function SharePasscodeGate({
   title,
 }: SharePasscodeGateProps): React.JSX.Element {
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-[color:var(--background)] px-4 text-[color:var(--foreground)]">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
+    <main className="portal-shell flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-md space-y-4">
+        <div className="px-1">
+          <PortalBrand context="Secure client review" />
+        </div>
+        <Card className="w-full border-[color:var(--portal-border-strong)] bg-[color:var(--portal-surface-1)] shadow-2xl shadow-black/25">
+          <CardHeader className="items-center text-center">
+            <span
+              aria-hidden="true"
+              className="mb-2 grid size-11 place-items-center rounded-xl border border-blue-400/25 bg-blue-400/10 text-blue-200"
+            >
+              <LockKeyhole className="size-5" />
+            </span>
           <CardTitle
             aria-level={1}
-            className="flex items-center justify-center gap-2 text-2xl"
+              className="text-2xl"
             role="heading"
           >
-            <LockKeyhole className="size-5" />
             {title}
           </CardTitle>
           <CardDescription className="text-sm leading-6">{description}</CardDescription>
@@ -51,9 +62,12 @@ export function SharePasscodeGate({
             <Field>
               <FieldLabel htmlFor="share-passcode">Passcode</FieldLabel>
               <Input
+                aria-describedby={error ? "share-passcode-error" : undefined}
+                aria-invalid={Boolean(error)}
                 autoComplete="current-password"
                 autoFocus
                 id="share-passcode"
+                name="passcode"
                 onChange={(event) => onPasscodeChange(event.target.value)}
                 required
                 size="lg"
@@ -62,16 +76,22 @@ export function SharePasscodeGate({
               />
             </Field>
             {error ? (
-              <p className="text-sm text-[color:var(--destructive)]" role="alert">
+              <p
+                className="text-sm text-red-300"
+                id="share-passcode-error"
+                role="alert"
+              >
                 {error}
               </p>
             ) : null}
-            <Button className="w-full" disabled={loading} size="xl" type="submit">
-              {loading ? "Checking passcode" : "Unlock review"}
+            <Button className="w-full" disabled={loading || !passcode} size="xl" type="submit">
+              <LockKeyhole aria-hidden="true" />
+              {loading ? "Checking passcode…" : "Unlock review"}
             </Button>
           </form>
         </CardContent>
       </Card>
+      </div>
     </main>
   );
 }

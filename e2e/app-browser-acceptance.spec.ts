@@ -43,7 +43,9 @@ test("browser: root redirects to the protected admin route", async ({ page }) =>
   await page.goto("/");
 
   await expect(page).toHaveURL(/\/admin$/);
-  await expect(page.getByRole("heading", { name: "Client reviews" })).toBeVisible();
+  await expect(page.getByText("Pixel Point").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByText("Create your first project")).toBeVisible();
 });
 
 test("browser: old hash video links are replaced with clean public paths", async ({ page }) => {
@@ -80,7 +82,9 @@ test("browser: share page opens an encoded project and records timestamped feedb
 
   await expect(page.getByRole("heading", { name: "Client review" })).toBeVisible();
   await expect(
-    page.getByText("12:00 video - Suggested 1.5x - Watch in about 8:00").first(),
+    page.locator("span:visible", {
+      hasText: "12:00 video - Suggested 1.5x - Watch in about 8:00",
+    }).first(),
   ).toBeVisible();
   await expect(page.locator('iframe[title="Homepage walkthrough Gumlet video"]')).toHaveAttribute(
     "src",
@@ -105,6 +109,38 @@ test("browser: share page opens an encoded project and records timestamped feedb
     "src",
     /https:\/\/play\.gumlet\.io\/embed\/asset-share-2\?background=false&autoplay=false&loop=false&disable_player_controls=false/,
   );
+});
+
+test("browser: collection keeps video navigation beside the player on mobile", async ({ page }) => {
+  const encoded = encodeShareProject(shareProjectFixture);
+
+  await page.setViewportSize({ width: 430, height: 900 });
+  await page.goto(`/share/${shareProjectFixture.shareSlug}?data=${encoded}`);
+
+  await expect(page.locator("span:visible", { hasText: "Pixel Point" }).first()).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Video collection" })).toBeVisible();
+  await expect(page.getByText("Notes on this device")).toBeVisible();
+  await expect(page.getByText(/not sent to the administrator/i)).toBeVisible();
+
+  const navigationPrecedesPlayer = await page.evaluate(() => {
+    const navigation = document.querySelector('[aria-label="Video collection"]');
+    const player = document.querySelector('[data-testid="collection-player"]');
+
+    return Boolean(
+      navigation &&
+        player &&
+        navigation.compareDocumentPosition(player) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  expect(navigationPrecedesPlayer).toBe(true);
+
+  await page.getByLabel("Playback speed").click();
+  await page.getByRole("option", { name: "2x" }).click();
+  await expect(page.getByText("6:00 at 2x")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(430);
 });
 
 test("browser: encoded share and video routes survive refresh without localStorage", async ({
@@ -215,6 +251,7 @@ test("browser: passcode-protected video token blocks details until unlock", asyn
   await page.evaluate(() => window.localStorage.clear());
   await page.goto("/video/protected_video");
 
+  await expect(page.getByText("Pixel Point")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Protected video" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeHidden();
 
@@ -316,6 +353,45 @@ test("browser: video page starts one shared video at selected speed from the ove
       playbackRate: 1.5,
       volume: 1,
     });
+});
+
+test("browser: video viewer can choose speed and the mobile start panel stays below the player", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = function mockPlay() {
+      return Promise.resolve();
+    };
+  });
+
+  const shareUrl = createVideoShareUrl(
+    shareProjectFixture,
+    shareProjectFixture.videos[0]!,
+    "http://127.0.0.1:3002",
+  );
+  const path = new URL(shareUrl).pathname + new URL(shareUrl).search;
+
+  await page.setViewportSize({ width: 430, height: 900 });
+  await page.goto(path);
+
+  await expect(page.locator("span:visible", { hasText: "Pixel Point" }).first()).toBeVisible();
+  await page.getByLabel("Playback speed").click();
+  await page.getByRole("option", { name: "2x" }).click();
+  await expect(page.getByText("Watch in about 6:00").first()).toBeVisible();
+  await expect(page.getByText("Save about 6:00").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Start 2x review/ })).toBeVisible();
+
+  const playerBox = await page.getByTestId("video-player-frame").boundingBox();
+  const startBox = await page.getByTestId("review-start-panel").boundingBox();
+
+  expect(playerBox).not.toBeNull();
+  expect(startBox).not.toBeNull();
+  expect(startBox!.y).toBeGreaterThanOrEqual(playerBox!.y + playerBox!.height - 1);
+
+  await page.getByRole("button", { name: /Start 2x review/ }).click();
+  await expect
+    .poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).playbackRate))
+    .toBe(2);
 });
 
 test("browser: Gumlet video page shows stored time savings immediately", async ({ page }) => {

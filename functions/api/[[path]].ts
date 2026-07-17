@@ -26,6 +26,9 @@ const unavailableDatabase: PortalCloudDatabase = {
   createShareLink: () => {
     throw new Error("D1 binding DB is not configured.");
   },
+  findReusableShareLink: () => {
+    throw new Error("D1 binding DB is not configured.");
+  },
   getShareLink: () => {
     throw new Error("D1 binding DB is not configured.");
   },
