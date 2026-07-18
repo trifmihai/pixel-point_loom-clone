@@ -187,3 +187,178 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   await expect(page.getByText("0 videos").first()).toBeVisible();
   await expect(page.getByText("Add a Gumlet video to preview it here.")).toBeVisible();
 });
+
+test("browser: admin receives unread feedback and manages the mobile feedback workflow", async ({
+  context,
+  page,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const feedbackVideo = {
+    assetId: "asset-feedback-1",
+    createdAt: "2026-07-17T14:00:00.000Z",
+    directVideoUrl: "https://video.gumlet.io/workspace/asset-feedback-1/main.mp4",
+    durationSeconds: 120,
+    id: "video_feedback_1",
+    orderIndex: 0,
+    recommendedPlaybackSpeed: 1.5,
+    title: "Feedback walkthrough",
+    updatedAt: "2026-07-17T14:00:00.000Z",
+  };
+  const project = { ...adminProjectFixture, videos: [feedbackVideo] };
+  const comments: Array<Record<string, unknown>> = [
+    {
+      authorEmail: "mira@example.com",
+      authorName: "Mira",
+      authorRole: "guest",
+      body: "Please align this card with the heading.",
+      createdAt: "2026-07-17T15:00:00.000Z",
+      id: "feedback_admin_1",
+      positionX: 62,
+      positionY: 35,
+      projectId: project.id,
+      shareToken: "feedback_token_1",
+      status: "open",
+      timestampSeconds: 12.5,
+      updatedAt: "2026-07-17T15:00:00.000Z",
+      videoId: feedbackVideo.id,
+    },
+  ];
+  let unreadCount = 1;
+
+  await page.route("**/api/admin/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (url.pathname === "/api/admin/feedback" && request.method() === "GET") {
+      await route.fulfill({
+        body: JSON.stringify({
+          videos:
+            comments.length > 0
+              ? [
+                  {
+                    openCount: comments[0]?.status === "open" ? 1 : 0,
+                    projectId: project.id,
+                    resolvedCount: comments[0]?.status === "resolved" ? 1 : 0,
+                    unreadCount,
+                    videoId: feedbackVideo.id,
+                  },
+                ]
+              : [],
+        }),
+        contentType: "application/json",
+      });
+      return;
+    }
+
+    if (
+      url.pathname === `/api/admin/videos/${feedbackVideo.id}/feedback/read` &&
+      request.method() === "POST"
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      unreadCount = 0;
+      comments[0] = comments[0] ? { ...comments[0], adminReadAt: "2026-07-17T15:01:00.000Z" } : comments[0]!;
+      await route.fulfill({ body: JSON.stringify({ read: true }), contentType: "application/json" });
+      return;
+    }
+
+    if (
+      url.pathname === `/api/admin/videos/${feedbackVideo.id}/feedback` &&
+      request.method() === "GET"
+    ) {
+      await route.fulfill({
+        body: JSON.stringify({ comments }),
+        contentType: "application/json",
+      });
+      return;
+    }
+
+    if (
+      url.pathname === "/api/admin/feedback/feedback_admin_1/replies" &&
+      request.method() === "POST"
+    ) {
+      const input = request.postDataJSON() as { body: string };
+      const reply = {
+        authorEmail: "admin@example.com",
+        authorName: "Pixel Point",
+        authorRole: "admin",
+        body: input.body,
+        createdAt: "2026-07-17T15:02:00.000Z",
+        id: "feedback_reply_1",
+        parentId: "feedback_admin_1",
+        projectId: project.id,
+        shareToken: "feedback_token_1",
+        status: comments[0]?.status,
+        timestampSeconds: 12.5,
+        updatedAt: "2026-07-17T15:02:00.000Z",
+        videoId: feedbackVideo.id,
+      };
+      comments.push(reply);
+      await route.fulfill({ body: JSON.stringify(reply), contentType: "application/json", status: 201 });
+      return;
+    }
+
+    if (
+      url.pathname === "/api/admin/feedback/feedback_admin_1" &&
+      request.method() === "PATCH"
+    ) {
+      const patch = request.postDataJSON() as { deleted?: boolean; status?: "open" | "resolved" };
+
+      if (patch.deleted) {
+        comments.splice(0, comments.length);
+      } else if (comments[0] && patch.status) {
+        comments[0] = { ...comments[0], status: patch.status };
+      }
+      await route.fulfill({
+        body: JSON.stringify(comments[0] ?? { deleted: true }),
+        contentType: "application/json",
+      });
+      return;
+    }
+
+    await route.fulfill({
+      body: JSON.stringify({ error: { code: "not_found", message: "Mock route not found." } }),
+      contentType: "application/json",
+      status: 404,
+    });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/admin");
+  await page.evaluate(
+    ({ key, value }) => window.localStorage.setItem(key, JSON.stringify(value)),
+    { key: portalStorageKey, value: { projects: [project] } },
+  );
+  await page.reload();
+
+  await expect(page.getByText("1 new")).toBeVisible();
+  await expect(page.getByText("Please align this card with the heading.")).toBeVisible();
+  await expect(page.getByText("mira@example.com")).toBeVisible();
+
+  await page.getByRole("button", { name: "Feedback actions" }).click();
+  await page.getByRole("menuitem", { name: "Reply" }).click();
+  await page.getByLabel("Admin reply").fill("Thanks, I will align it.");
+  await page.getByRole("button", { name: "Add reply" }).click();
+  await expect(page.getByText("Thanks, I will align it.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Feedback actions" }).click();
+  await page.getByRole("menuitem", { name: "Resolve" }).click();
+  await expect(page.getByText("resolved", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Feedback actions" }).click();
+  await page.getByRole("menuitem", { name: "Copy direct link" }).click();
+  await expect(page.getByText("Direct feedback link copied.")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toMatch(/\/video\/feedback_token_1\?comment=feedback_admin_1$/);
+
+  await page.setViewportSize({ width: 430, height: 900 });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(430);
+
+  await page.getByRole("button", { name: "Feedback actions" }).click();
+  await page.getByRole("menuitem", { name: "Delete feedback" }).click();
+  await expect(page.getByRole("alertdialog", { name: "Delete this feedback?" })).toBeVisible();
+  await page.getByRole("button", { name: "Delete feedback" }).click();
+  await expect(page.getByText("No feedback yet")).toBeVisible();
+});

@@ -21,4 +21,14 @@ describe("Gumlet player presentation contract", () => {
     expect(source).not.toMatch(/onLoad=\{\(\) => \{\s*setPlayerReady/);
     expect(source).not.toContain("allowFullScreen");
   });
+
+  it("exposes review-mode time, pause, and seek behavior", () => {
+    expect(source).toContain("onCurrentTime?: (currentTimeSeconds: number) => void");
+    expect(source).toContain("requestCurrentTime: () => void");
+    expect(source).toContain("pause: () => void");
+    expect(source).toContain("seekTo: (seconds: number) => void");
+    expect(source).toContain("buildGumletCurrentTimeCommands");
+    expect(source).toContain("buildGumletPauseCommands");
+    expect(source).toContain("buildGumletSeekCommands");
+  });
 });

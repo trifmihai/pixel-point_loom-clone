@@ -80,6 +80,42 @@ describe("Cloudflare Pages static deployment config", () => {
     expect(frontendSource).not.toMatch(/axios|stripe|resend|mongoose|mongodb|daisyui/i);
   });
 
+  it("defines the timestamped feedback D1 migration and required lookup indexes", () => {
+    const migration = readFileSync("migrations/0002_feedback_comments.sql", "utf8");
+
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS feedback_comments");
+    for (const column of [
+      "share_token",
+      "project_id",
+      "video_id",
+      "parent_id",
+      "author_name",
+      "author_email",
+      "author_role",
+      "body",
+      "timestamp_seconds",
+      "position_x",
+      "position_y",
+      "status",
+      "admin_read_at",
+      "created_at",
+      "updated_at",
+      "deleted_at",
+    ]) {
+      expect(migration).toContain(column);
+    }
+    for (const indexTarget of [
+      "share_token",
+      "video_id",
+      "project_id",
+      "parent_id",
+      "status",
+      "admin_read_at",
+    ]) {
+      expect(migration).toMatch(new RegExp(`CREATE INDEX[^;]+${indexTarget}`, "i"));
+    }
+  });
+
   it("uses free app-level admin authentication without frontend secrets", () => {
     const apiFunction = readFileSync("functions/api/[[path]].ts", "utf8");
     const adminRoute = readFileSync("src/routes/admin.tsx", "utf8");

@@ -6,7 +6,7 @@ This file records product decisions and the evidence behind them.
 
 Mode: product
 
-The app is now the Pixel Point video-sharing portal with local fallback plus optional Cloudflare D1 cloud sync. It organizes existing Gumlet videos, reuses stable tokenized project and single-video share links when cloud sync is enabled, keeps encoded links as a legacy fallback, embeds Gumlet videos with visible failure handling, lets viewers choose playback speed, and collects timestamped notes locally on client pages.
+The app is now the Pixel Point video-sharing portal with local fallback plus Cloudflare D1 cloud sync. It organizes existing Gumlet videos, reuses stable tokenized project and single-video share links when cloud sync is enabled, keeps encoded links as a legacy fallback, embeds Gumlet videos with visible failure handling, lets viewers choose playback speed, keeps legacy collection notes local, and persists positioned timestamped feedback for cloud video tokens in D1.
 
 ## Decision Trail
 
@@ -215,13 +215,30 @@ The app is now the Pixel Point video-sharing portal with local fallback plus opt
 - Verification: Stable-link API tests failed first, then passed for repeated project/video creation plus exact passcode/expiry semantics. Responsive admin, viewer-speed/mobile overlay, collection ordering, protected access identity, and Gumlet failure-state tests failed first, then passed. `npm.cmd run verify:quick` passed Toolcraft docs/integrity, 12 Node tests, and 59 Vitest tests. The functional Playwright run passed all 14 admin/public tests with a clean exit by reusing the verified `http://127.0.0.1:3002/` app server. Browser screenshots covered admin/share/video at 1440, 1280, 1024, 768, 430, 390, and 360 pixels with document width equal to viewport width in every case. A blocked Gumlet request produced the intended visible delayed-player state and no app console errors. The first final-gate attempt passed tests and build but stalled in the template's unconditional browser download; `scripts/ensure-playwright-browser.mjs` now verifies the installed Chromium executable before downloading, so offline verification does not re-run a network installer. The fresh second `npm.cmd run verify:final` run completed with exit code 0: AI/docs/integrity checks, 12 Node tests, 59 Vitest tests, typecheck, production build, and all 14 non-performance Playwright tests passed.
 - Risks: The sandbox blocks `play.gumlet.io`, so live media playback cannot be re-proven here; the app now exposes that condition clearly, while adapter/browser tests verify command behavior. Local feedback remains intentionally browser-local and is now labeled as such. Existing links can still stop resolving when an administrator deliberately deletes their target content, revokes them, or their configured expiry passes; destructive dialogs now state the deletion consequence.
 
+### Iteration 13 - Timestamped visual feedback
+
+- Request: Add a focused Loom/Figma-style V1 where a client clicks a point on a public token video to leave D1-persisted timestamped feedback, and the signed-in administrator can receive, reply to, resolve/reopen, link, read, and soft-delete it.
+- Task type: Tier 4 post-first-working D1 schema, public/admin API, player interaction, responsive public UI, and admin workflow feature.
+- User-visible result: Cloud-token video pages now have Watch and Review modes, positioned numbered markers, a responsive comment composer, filtered comment cards, remembered guest identity, and direct-comment focus links. Admin video cards show unread/open/resolved counts and the selected video has a focused Feedback section with replies and moderation actions.
+- Source/reference checked: The user's timestamped-visual-feedback brief, existing `/video/$slug`, `/share/$slug`, `/admin`, Pages Function router, D1 migration, portal API client, Gumlet player.js adapter, Toolcraft UI exports, existing unit/browser acceptance, and the supplied admin/video screenshots as current-state context only.
+- Reference inputs: User pasted-text feature brief and two current-product screenshots. No Figma URL, video, GIF, screen recording, contact sheet, or extracted frames were supplied, so no Figma inspection or Video Reference Study was required.
+- Docs/contracts read: `AGENTS.md`, `docs/toolcraft/workflow.md`, `assembly-workflow.md`, `decision-contract.md`, `component-rules.md`, `acceptance-testing.md`, `performance.md`, plus required brainstorming, writing-plans, test-driven-development, systematic-debugging, frontend-design, and browser skills.
+- Contract rules applied: Preserve existing routes/tokens/auth/playback/legacy fallback; use existing Toolcraft UI components; keep route controls out of `canvasContent`; declare an empty schema control-section inventory because portal controls remain operational route UI; persist comments in D1 and only guest identity in localStorage; omit timeline, layers, export, and custom renderer; classify broad cross-surface work as Tier 4.
+- Decision: Store flat parent/reply records in `feedback_comments`, authorize every public request through the active share token and optional in-memory passcode, omit guest email/read metadata from public DTOs, hide soft-deleted parents and their replies, and use percentage positions so markers remain stable across responsive video sizes.
+- Alternatives rejected: localStorage-only comments because admin receipt and cross-device persistence are required; user accounts, notifications, reactions, drawings, screenshots, deep threads, and paid Cloudflare products because they exceed V1; a custom video player because native/Gumlet playback remains source of truth; a custom Toolcraft renderer/timeline because this is a DOM portal interaction over hosted video.
+- State/output mapping: Overlay clicks map `clientX/clientY` into clamped x/y percentages and read native/Gumlet current time. Public `portalApi` calls write/read token-scoped D1 rows. The video route's `comment` search param selects and seeks the matching row. Admin summary/detail endpoints feed video badges and the Feedback panel; reply/status/read/delete actions write back through signed-cookie admin APIs. Guest name/email convenience values use `pixel-point.feedback.guest.v1` only.
+- Files changed: `migrations/0002_feedback_comments.sql`; feedback types/utilities/API/database code under `src/app`; Pages Function unavailable adapter; Gumlet current-time/pause/seek adapter; public and admin feedback components; route search contract; acceptance/unit/browser tests; product spec/plan; and this worklog. `src/toolcraft` and paid-service configuration were not changed.
+- Verification: Red tests first proved the missing migration/utilities/endpoints and Gumlet controls. Focused Vitest passed 45 tests across feedback validation/mapping, migration, API/auth/privacy/scope, player adapter, component usage, and acceptance metadata. Focused Playwright passed all 3 new public/admin flows, including 390px and 430px widths, persistent mocked API state, direct focus/seek, unread/read, reply, resolve, copy, and delete. `npm.cmd run verify:quick` passed Toolcraft docs/integrity, 12 Node tests, and all 76 Vitest tests. `npm.cmd run verify:final` then completed with exit code 0 against the verified same-app server: AI/docs/integrity checks, the same 12 Node and 76 Vitest tests, TypeScript, production Vite build, and all 17 functional Playwright scenarios passed. Runner: Playwright functional fallback; a full performance checkpoint was not triggered for this post-first-working non-performance feature.
+- Skipped checks: Full browser performance checkpoint is not required for this post-first-working low-count DOM/API feature. It adds no custom renderer, Toolcraft canvas, export, animation, or reported performance problem; functional mobile browser checks cover the touched interaction/layout paths.
+- Risks: Production requires applying `0002_feedback_comments.sql` before the new endpoints are used. Gumlet timestamp capture depends on player.js current-time events and falls back to the last reported time until a response arrives. Rate limiting is the existing per-isolate in-memory Pages Function limiter, appropriate for basic V1 abuse protection but not a global quota.
+
 ## Decisions
 
 ### Renderer
 
-- Decision: Use ordinary React DOM UI plus Gumlet iframe embeds and native MP4 playback for single-video pages when a direct Gumlet MP4 URL is available.
+- Decision: Use ordinary React DOM UI plus Gumlet iframe embeds and native MP4 playback, with a DOM feedback overlay for cloud-token single-video pages.
 - Reason: The product is an operational portal, not a generated visual canvas/export tool; native video is the browser-controlled path that can enforce playback speed.
-- Evidence: `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, `src/app/video-share-portal.tsx`, and `src/app/gumlet-player.tsx`.
+- Evidence: `src/app/admin-portal.tsx`, `src/app/admin-feedback-panel.tsx`, `src/app/share-portal.tsx`, `src/app/video-share-portal.tsx`, `src/app/video-feedback-review.tsx`, and `src/app/gumlet-player.tsx`.
 
 ### Timeline
 
@@ -237,9 +254,9 @@ The app is now the Pixel Point video-sharing portal with local fallback plus opt
 
 ### Controls
 
-- Decision: Use Toolcraft UI/shadcn-style primitives for visible portal controls and form chrome.
+- Decision: Use Toolcraft UI/shadcn-style primitives for visible portal controls, feedback composers, menus, confirmation dialogs, and form chrome.
 - Reason: The generated app includes a shared component system and the portal should not hand-roll available controls.
-- Evidence: `src/app/admin-portal.tsx`, `src/app/share-portal.tsx`, `src/app/video-share-portal.tsx`, and `src/app/portal-component-system.test.ts`.
+- Evidence: `src/app/admin-portal.tsx`, `src/app/admin-feedback-panel.tsx`, `src/app/share-portal.tsx`, `src/app/video-share-portal.tsx`, `src/app/video-feedback-review.tsx`, and `src/app/portal-component-system.test.ts`.
 
 ### Export
 

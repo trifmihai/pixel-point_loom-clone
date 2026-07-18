@@ -23,6 +23,9 @@ type PagesContext = {
 const defaultAdminEmail = "trifmihai.business@gmail.com";
 
 const unavailableDatabase: PortalCloudDatabase = {
+  createFeedbackComment: () => {
+    throw new Error("D1 binding DB is not configured.");
+  },
   createShareLink: () => {
     throw new Error("D1 binding DB is not configured.");
   },
@@ -32,13 +35,31 @@ const unavailableDatabase: PortalCloudDatabase = {
   getShareLink: () => {
     throw new Error("D1 binding DB is not configured.");
   },
+  getFeedbackComment: () => {
+    throw new Error("D1 binding DB is not configured.");
+  },
+  getFeedbackCountsByVideo: () => {
+    throw new Error("D1 binding DB is not configured.");
+  },
+  listFeedbackForShareToken: () => {
+    throw new Error("D1 binding DB is not configured.");
+  },
+  listFeedbackForVideo: () => {
+    throw new Error("D1 binding DB is not configured.");
+  },
   listProjects: () => {
+    throw new Error("D1 binding DB is not configured.");
+  },
+  markVideoFeedbackRead: () => {
     throw new Error("D1 binding DB is not configured.");
   },
   replaceProjects: () => {
     throw new Error("D1 binding DB is not configured.");
   },
   revokeShareLink: () => {
+    throw new Error("D1 binding DB is not configured.");
+  },
+  updateFeedbackComment: () => {
     throw new Error("D1 binding DB is not configured.");
   },
 };

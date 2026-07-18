@@ -12,12 +12,16 @@ describe("portal acceptance metadata", () => {
     });
     expect(appProductReadiness.requestedBehavior).toContain("Gumlet asset IDs");
     expect(appProductReadiness.requestedBehavior).toContain("stable project and video share links");
+    expect(appProductReadiness.requestedBehavior).toContain("D1-persisted timestamped visual feedback");
     expect(appAcceptance).toEqual(
       expect.arrayContaining([
         "admin creates projects",
         "admin adds Gumlet videos by asset ID",
         "share page embeds Gumlet videos",
         "share page records timestamped notes locally",
+        "cloud video review places timestamped positioned feedback persisted through the public API",
+        "direct comment links open Review mode and focus the matching timestamp",
+        "admin sees unread feedback badges and can reply resolve reopen copy and soft-delete",
         "public token and encoded fallback routes survive refresh",
       ]),
     );

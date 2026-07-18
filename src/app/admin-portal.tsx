@@ -78,6 +78,8 @@ import {
 } from "@/toolcraft/ui/components/primitives";
 
 import { getAppConfig } from "./app-config";
+import { AdminFeedbackPanel } from "./admin-feedback-panel";
+import type { FeedbackVideoSummary } from "./feedback-types";
 import { GumletPlayer, type GumletPlayerHandle } from "./gumlet-player";
 import { PortalBrand, PortalPageHeader, PortalStatus, TimeSavingsSummary } from "./portal-ui";
 import { getPortalApiErrorMessage, portalApi } from "./portal-api";
@@ -271,6 +273,26 @@ function SpeedSelect({ ariaLabel, onValueChange, value }: SpeedSelectProps): Rea
   );
 }
 
+function VideoFeedbackBadges({
+  summary,
+}: {
+  summary?: FeedbackVideoSummary;
+}): React.JSX.Element | null {
+  if (!summary) {
+    return null;
+  }
+
+  return (
+    <span className="mt-1 flex flex-wrap gap-1.5">
+      {summary.unreadCount > 0 ? <Badge>{summary.unreadCount} new</Badge> : null}
+      <Badge variant="mutedOutline">{summary.openCount} open</Badge>
+      {summary.resolvedCount > 0 ? (
+        <Badge variant="secondary">{summary.resolvedCount} resolved</Badge>
+      ) : null}
+    </span>
+  );
+}
+
 export function AdminPortal(): React.JSX.Element {
   const config = React.useMemo(() => getAppConfig(), []);
   const [data, setData] = React.useState<PortalData>(loadInitialData);
@@ -307,12 +329,31 @@ export function AdminPortal(): React.JSX.Element {
       : "Local projects are stored only in this browser.",
   );
   const [browserHasLocalProjects, setBrowserHasLocalProjects] = React.useState(hasLocalProjects);
+  const [feedbackSummaries, setFeedbackSummaries] = React.useState<FeedbackVideoSummary[]>([]);
+  const [feedbackApiAvailable, setFeedbackApiAvailable] = React.useState(
+    config.cloudSyncEnabled,
+  );
   const cloudReadyRef = React.useRef(!config.cloudSyncEnabled);
   const cloudSaveTimeoutRef = React.useRef<number | null>(null);
   const previewPlayerRef = React.useRef<GumletPlayerHandle | null>(null);
   const productionCloudSyncDisabled = isProductionPagesHost() && !config.cloudSyncEnabled;
   const adminSessionExpected = config.cloudSyncEnabled || isProductionPagesHost();
   const cloudBusy = config.cloudSyncEnabled && (cloudStatus === "loading" || cloudStatus === "saving");
+
+  const loadFeedbackSummaries = React.useCallback(async () => {
+    try {
+      const response = await portalApi.getAdminFeedback();
+      setFeedbackSummaries(response.videos);
+      setFeedbackApiAvailable(true);
+    } catch {
+      setFeedbackSummaries([]);
+      setFeedbackApiAvailable(config.cloudSyncEnabled);
+    }
+  }, [config.cloudSyncEnabled]);
+
+  React.useEffect(() => {
+    void loadFeedbackSummaries();
+  }, [loadFeedbackSummaries]);
 
   React.useEffect(() => {
     if (!config.cloudSyncEnabled) {
@@ -1136,6 +1177,12 @@ export function AdminPortal(): React.JSX.Element {
                           {activeVideo.description || "No description added."}
                         </CardContent>
                       </Card>
+                      <AdminFeedbackPanel
+                        enabled={feedbackApiAvailable}
+                        onChanged={loadFeedbackSummaries}
+                        publicAppUrl={config.publicAppUrl}
+                        video={activeVideo}
+                      />
                     </div>
                   ) : (
                     <Empty className="min-h-[320px]" variant="outline">
@@ -1184,6 +1231,11 @@ export function AdminPortal(): React.JSX.Element {
                                   <span className="text-xs text-[color:var(--muted-foreground)]">
                                     {getVideoMeta(video)}
                                   </span>
+                                  <VideoFeedbackBadges
+                                    summary={feedbackSummaries.find(
+                                      (summary) => summary.videoId === video.id,
+                                    )}
+                                  />
                                 </span>
                               </Button>
                               <DropdownMenu>

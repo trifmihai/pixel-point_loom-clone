@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildGumletCurrentTimeCommands,
+  buildGumletPauseCommands,
+  buildGumletSeekCommands,
   buildGumletStartCommands,
   parseGumletPlayerMessage,
   postGumletCommands,
@@ -124,5 +127,36 @@ describe("gumlet player adapter", () => {
         }),
       ),
     ).toEqual({ muted: false });
+  });
+
+  it("parses current time and builds review pause, time, and seek commands", () => {
+    expect(
+      parseGumletPlayerMessage({
+        context: "player.js",
+        event: "getCurrentTime",
+        value: 42.25,
+        version: "3.0",
+      }),
+    ).toEqual({ currentTimeSeconds: 42.25 });
+    expect(
+      parseGumletPlayerMessage({
+        context: "player.js",
+        event: "timeupdate",
+        value: { seconds: 18.5 },
+        version: "3.0",
+      }),
+    ).toEqual({ currentTimeSeconds: 18.5 });
+
+    expect(parsePlayerJsCommands(buildGumletCurrentTimeCommands())).toEqual(
+      expect.arrayContaining([expect.objectContaining({ method: "getCurrentTime" })]),
+    );
+    expect(parsePlayerJsCommands(buildGumletPauseCommands())).toEqual(
+      expect.arrayContaining([expect.objectContaining({ method: "pause" })]),
+    );
+    expect(parsePlayerJsCommands(buildGumletSeekCommands(31.75))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ method: "setCurrentTime", value: 31.75 }),
+      ]),
+    );
   });
 });

@@ -30,6 +30,7 @@ import {
   TimeSavingsSummary,
 } from "./portal-ui";
 import { SharePasscodeGate } from "./share-passcode-gate";
+import { VideoFeedbackReview } from "./video-feedback-review";
 import {
   calculatePlaybackSavings,
   decodeShareVideoSnapshot,
@@ -39,6 +40,7 @@ import {
 import type { GumletPlayerMessage } from "./gumlet-player-adapter";
 
 type VideoSharePortalProps = {
+  directCommentId?: string;
   encodedData?: string;
   slug: string;
 };
@@ -175,6 +177,7 @@ function getGumletPlaybackFallbackMessage(playbackSpeed: number): string {
 }
 
 export function VideoSharePortal({
+  directCommentId,
   encodedData,
   slug,
 }: VideoSharePortalProps): React.JSX.Element {
@@ -186,6 +189,8 @@ export function VideoSharePortal({
   >(() => (snapshot || encodedData ? "idle" : "loading"));
   const [tokenError, setTokenError] = React.useState("");
   const [passcodeDraft, setPasscodeDraft] = React.useState("");
+  const [feedbackPasscode, setFeedbackPasscode] = React.useState<string | undefined>();
+  const [cloudTokenResolved, setCloudTokenResolved] = React.useState(false);
   const [passcodeLoading, setPasscodeLoading] = React.useState(false);
   const [started, setStarted] = React.useState(false);
   const [gumletStartPending, setGumletStartPending] = React.useState(false);
@@ -197,6 +202,7 @@ export function VideoSharePortal({
   const [viewerSpeed, setViewerSpeed] = React.useState<PlaybackSpeed>(
     () => snapshot?.video.recommendedPlaybackSpeed ?? 1.5,
   );
+  const [reviewTimestampSeconds, setReviewTimestampSeconds] = React.useState(0);
   const gumletPlayerRef = React.useRef<GumletPlayerHandle | null>(null);
   const gumletAttemptRef = React.useRef<GumletPlaybackAttempt>({
     active: false,
@@ -233,6 +239,7 @@ export function VideoSharePortal({
 
     if (legacySnapshot) {
       setSnapshot(legacySnapshot);
+      setCloudTokenResolved(false);
       setTokenStatus("idle");
       setTokenError("");
       return undefined;
@@ -268,6 +275,7 @@ export function VideoSharePortal({
         }
 
         setSnapshot(nextSnapshot);
+        setCloudTokenResolved(true);
         setTokenStatus("idle");
       })
       .catch((error: unknown) => {
@@ -326,6 +334,7 @@ export function VideoSharePortal({
     setGumletPlaybackStatus("");
     setMetadataDurationSeconds(undefined);
     setDurationDetectionTimedOut(false);
+    setReviewTimestampSeconds(video?.startTimeSeconds ?? 0);
     gumletAttemptRef.current = {
       active: false,
       playbackStarted: false,
@@ -386,11 +395,57 @@ export function VideoSharePortal({
   function handleNativeMetadata(): void {
     applyNativePlaybackSettings();
 
+    setReviewTimestampSeconds(nativeVideoRef.current?.currentTime ?? 0);
+
     const durationSeconds = getRoundedMetadataDuration(nativeVideoRef.current);
 
     if (durationSeconds) {
       handleResolvedDuration(durationSeconds);
     }
+  }
+
+  function handleReviewPause(): void {
+    const nativePlayer = nativeVideoRef.current;
+
+    if (nativePlayer) {
+      nativePlayer.pause();
+      setReviewTimestampSeconds(nativePlayer.currentTime);
+      return;
+    }
+
+    gumletPlayerRef.current?.pause();
+    gumletPlayerRef.current?.requestCurrentTime();
+  }
+
+  function handleReviewRequestCurrentTime(): void {
+    const nativePlayer = nativeVideoRef.current;
+
+    if (nativePlayer) {
+      setReviewTimestampSeconds(nativePlayer.currentTime);
+      return;
+    }
+
+    gumletPlayerRef.current?.requestCurrentTime();
+  }
+
+  function handleReviewSeek(seconds: number): void {
+    const safeSeconds = Math.max(0, seconds);
+    const nativePlayer = nativeVideoRef.current;
+
+    setReviewTimestampSeconds(safeSeconds);
+
+    if (nativePlayer) {
+      try {
+        nativePlayer.currentTime = safeSeconds;
+      } catch {
+        // Metadata may still be loading; the selected feedback remains highlighted.
+      }
+      nativePlayer.pause();
+      return;
+    }
+
+    gumletPlayerRef.current?.seekTo(safeSeconds);
+    gumletPlayerRef.current?.pause();
   }
 
   function handleGumletPlaybackEvent(message: GumletPlayerMessage): void {
@@ -515,6 +570,8 @@ export function VideoSharePortal({
       }
 
       setSnapshot(nextSnapshot);
+      setCloudTokenResolved(true);
+      setFeedbackPasscode(passcodeDraft);
       setTokenStatus("idle");
       setPasscodeDraft("");
     } catch (error) {
@@ -608,7 +665,22 @@ export function VideoSharePortal({
           title={video.title}
         />
 
-        <div className="relative" id="video-player">
+        <VideoFeedbackReview
+          currentTimeSeconds={reviewTimestampSeconds}
+          directCommentId={directCommentId}
+          enabled={cloudTokenResolved}
+          onModeChange={(mode) => {
+            if (mode === "review") {
+              setStarted(true);
+            }
+          }}
+          onPause={handleReviewPause}
+          onRequestCurrentTime={handleReviewRequestCurrentTime}
+          onSeek={handleReviewSeek}
+          passcode={feedbackPasscode}
+          token={slug}
+          videoId={video.id}
+        >
           <section
             className="min-w-0 overflow-hidden rounded-xl border border-[color:var(--portal-border-strong)] bg-black shadow-2xl shadow-black/30"
             data-testid="video-player-frame"
@@ -620,6 +692,7 @@ export function VideoSharePortal({
                 controls
                 onLoadedMetadata={handleNativeMetadata}
                 onPlay={() => applyNativePlaybackSettings({ audible: true })}
+                onTimeUpdate={(event) => setReviewTimestampSeconds(event.currentTarget.currentTime)}
                 poster={video.thumbnailUrl}
                 playsInline
                 preload="metadata"
@@ -629,6 +702,7 @@ export function VideoSharePortal({
             ) : playbackVideo ? (
               <GumletPlayer
                 ref={gumletPlayerRef}
+                onCurrentTime={setReviewTimestampSeconds}
                 onDuration={handleResolvedDuration}
                 onPlaybackEvent={handleGumletPlaybackEvent}
                 video={playbackVideo}
@@ -691,7 +765,7 @@ export function VideoSharePortal({
               </div>
             </div>
           ) : null}
-        </div>
+        </VideoFeedbackReview>
 
         <PortalStatus
           message={gumletPlaybackStatus}

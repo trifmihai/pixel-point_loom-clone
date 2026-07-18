@@ -1,4 +1,12 @@
 import type { PortalData, PortalProject, VideoShareSnapshot } from "./portal-types";
+import type {
+  CreateAdminReplyInput,
+  CreatePublicFeedbackInput,
+  FeedbackComment,
+  FeedbackSummaryResponse,
+  PublicFeedbackComment,
+  UpdateFeedbackInput,
+} from "./feedback-types";
 
 export type PortalApiState<T> = {
   data: T | null;
@@ -114,6 +122,31 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
 }
 
 export const portalApi = {
+  createAdminReply(
+    commentId: string,
+    input: CreateAdminReplyInput,
+  ): Promise<FeedbackComment> {
+    return requestJson<FeedbackComment>(
+      `/api/admin/feedback/${encodeURIComponent(commentId)}/replies`,
+      { body: JSON.stringify(input), method: "POST" },
+    );
+  },
+
+  createPublicComment(
+    token: string,
+    input: CreatePublicFeedbackInput,
+    passcode?: string,
+  ): Promise<PublicFeedbackComment> {
+    return requestJson<PublicFeedbackComment>(
+      `/api/public/share/${encodeURIComponent(token)}/comments`,
+      {
+        body: JSON.stringify(input),
+        headers: passcode ? { "X-Share-Passcode": passcode } : undefined,
+        method: "POST",
+      },
+    );
+  },
+
   createShareLink(input: CreateShareLinkInput): Promise<CreateShareLinkResponse> {
     return requestJson<CreateShareLinkResponse>("/api/admin/share-links", {
       body: JSON.stringify(input),
@@ -125,12 +158,35 @@ export const portalApi = {
     return requestJson<PortalData>("/api/admin/projects");
   },
 
+  getAdminFeedback(): Promise<FeedbackSummaryResponse> {
+    return requestJson<FeedbackSummaryResponse>("/api/admin/feedback");
+  },
+
   getAdminSession(): Promise<AdminSessionResponse> {
     return requestJson<AdminSessionResponse>("/api/auth/session");
   },
 
   getPublicShare(token: string): Promise<PublicShareResponse> {
     return requestJson<PublicShareResponse>(`/api/public/share/${encodeURIComponent(token)}`);
+  },
+
+  getPublicComments(
+    token: string,
+    videoId: string,
+    passcode?: string,
+  ): Promise<{ comments: PublicFeedbackComment[] }> {
+    const query = new URLSearchParams({ videoId });
+
+    return requestJson<{ comments: PublicFeedbackComment[] }>(
+      `/api/public/share/${encodeURIComponent(token)}/comments?${query.toString()}`,
+      { headers: passcode ? { "X-Share-Passcode": passcode } : undefined },
+    );
+  },
+
+  getVideoFeedback(videoId: string): Promise<{ comments: FeedbackComment[] }> {
+    return requestJson<{ comments: FeedbackComment[] }>(
+      `/api/admin/videos/${encodeURIComponent(videoId)}/feedback`,
+    );
   },
 
   importLocalProjects(data: PortalData): Promise<PortalData> {
@@ -153,6 +209,13 @@ export const portalApi = {
     });
   },
 
+  markVideoFeedbackRead(videoId: string): Promise<{ read: true }> {
+    return requestJson<{ read: true }>(
+      `/api/admin/videos/${encodeURIComponent(videoId)}/feedback/read`,
+      { method: "POST" },
+    );
+  },
+
   saveAdminProjects(data: PortalData): Promise<PortalData> {
     return requestJson<PortalData>("/api/admin/projects", {
       body: JSON.stringify({ data }),
@@ -167,6 +230,16 @@ export const portalApi = {
         body: JSON.stringify({ passcode }),
         method: "POST",
       },
+    );
+  },
+
+  updateFeedbackComment(
+    commentId: string,
+    patch: UpdateFeedbackInput,
+  ): Promise<FeedbackComment> {
+    return requestJson<FeedbackComment>(
+      `/api/admin/feedback/${encodeURIComponent(commentId)}`,
+      { body: JSON.stringify(patch), method: "PATCH" },
     );
   },
 };

@@ -216,6 +216,158 @@ test("browser: public token share and video routes load without localStorage", a
   await expect(page.getByRole("button", { name: /Start 1\.5x review/ })).toBeVisible();
 });
 
+test("browser: cloud video Review mode persists positioned feedback and guest identity on mobile", async ({
+  page,
+}) => {
+  const comments: Array<Record<string, unknown>> = [];
+  let capturedInput: Record<string, unknown> | null = null;
+
+  await page.route("**/api/public/share/feedback_token**", async (route) => {
+    const url = new URL(route.request().url());
+
+    if (url.pathname.endsWith("/comments")) {
+      if (route.request().method() === "POST") {
+        capturedInput = route.request().postDataJSON() as Record<string, unknown>;
+        const created = {
+          authorName: capturedInput.authorName,
+          authorRole: "guest",
+          body: capturedInput.body,
+          createdAt: "2026-07-17T15:00:00.000Z",
+          id: "feedback_public_1",
+          positionX: capturedInput.positionX,
+          positionY: capturedInput.positionY,
+          status: "open",
+          timestampSeconds: capturedInput.timestampSeconds,
+          updatedAt: "2026-07-17T15:00:00.000Z",
+          videoId: "video_share_1",
+        };
+        comments.push(created);
+        await route.fulfill({ body: JSON.stringify(created), contentType: "application/json", status: 201 });
+        return;
+      }
+
+      await route.fulfill({
+        body: JSON.stringify({ comments }),
+        contentType: "application/json",
+      });
+      return;
+    }
+
+    await route.fulfill({
+      body: JSON.stringify({
+        kind: "video",
+        snapshot: {
+          project: {
+            clientName: shareProjectFixture.clientName,
+            id: shareProjectFixture.id,
+            name: shareProjectFixture.name,
+            shareSlug: shareProjectFixture.shareSlug,
+          },
+          video: shareProjectFixture.videos[0],
+        },
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/video/feedback_token");
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
+
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  const placementButton = page.getByRole("button", { name: "Place feedback on video" });
+  await placementButton.click({ position: { x: 120, y: 110 } });
+
+  await page.getByLabel("Name").fill("Mira");
+  await page.getByLabel("Email (optional)").fill("mira@example.com");
+  await page.getByLabel("Comment").fill("Please tighten this transition.");
+  await page.getByRole("button", { name: "Add comment" }).click();
+
+  await expect(page.getByText("Please tighten this transition.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Open feedback 1 at/ })).toBeVisible();
+  expect(capturedInput).toMatchObject({
+    authorEmail: "mira@example.com",
+    authorName: "Mira",
+    body: "Please tighten this transition.",
+    videoId: "video_share_1",
+  });
+  expect(Number(capturedInput?.positionX)).toBeGreaterThan(0);
+  expect(Number(capturedInput?.positionX)).toBeLessThan(100);
+  expect(Number(capturedInput?.positionY)).toBeGreaterThan(0);
+  expect(Number(capturedInput?.positionY)).toBeLessThan(100);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await expect(page.getByText("Please tighten this transition.")).toBeVisible();
+  await placementButton.click({ position: { x: 180, y: 130 } });
+  await expect(page.getByLabel("Name")).toHaveValue("Mira");
+  await expect(page.getByLabel("Email (optional)")).toHaveValue("mira@example.com");
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(390);
+});
+
+test("browser: direct comment link opens Review mode and focuses the matching feedback", async ({
+  page,
+}) => {
+  const directComment = {
+    authorName: "Mira",
+    authorRole: "guest",
+    body: "Align this card with the heading.",
+    createdAt: "2026-07-17T15:00:00.000Z",
+    id: "feedback_direct_1",
+    positionX: 62,
+    positionY: 35,
+    status: "open",
+    timestampSeconds: 12.5,
+    updatedAt: "2026-07-17T15:00:00.000Z",
+    videoId: "video_share_1",
+  };
+
+  await page.route("**/api/public/share/direct_token**", async (route) => {
+    const url = new URL(route.request().url());
+
+    await route.fulfill({
+      body: JSON.stringify(
+        url.pathname.endsWith("/comments")
+          ? { comments: [directComment] }
+          : {
+              kind: "video",
+              snapshot: {
+                project: {
+                  clientName: shareProjectFixture.clientName,
+                  id: shareProjectFixture.id,
+                  name: shareProjectFixture.name,
+                  shareSlug: shareProjectFixture.shareSlug,
+                },
+                video: shareProjectFixture.videos[0],
+              },
+            },
+      ),
+      contentType: "application/json",
+    });
+  });
+
+  await page.goto("/video/direct_token?comment=feedback_direct_1");
+
+  await expect(page.getByRole("button", { name: "Review", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText("Align this card with the heading.")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.locator("article", { hasText: "Align this card with the heading." }).evaluate(
+        (element) => document.activeElement === element,
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime))
+    .toBe(12.5);
+});
+
 test("browser: passcode-protected video token blocks details until unlock", async ({ page }) => {
   await page.route("**/api/public/share/protected_video/passcode", async (route) => {
     const requestBody = route.request().postDataJSON() as { passcode: string };

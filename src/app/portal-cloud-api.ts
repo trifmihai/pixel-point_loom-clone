@@ -1,5 +1,13 @@
 import type { PlaybackSpeed, PortalData, PortalProject, PortalVideo } from "./portal-types";
 import { sanitizePublicPortalUrl } from "./portal-utils";
+import type {
+  FeedbackComment,
+  FeedbackCommentPatch,
+  FeedbackCommentRow,
+  FeedbackVideoSummary,
+} from "./feedback-types";
+import { mapFeedbackCommentRow } from "./feedback-utils";
+import { handleAdminFeedbackApi, handlePublicFeedbackApi } from "./portal-feedback-api";
 
 type D1Result<T> = {
   results?: T[];
@@ -35,15 +43,26 @@ export type PortalShareLinkMatch = Pick<
 >;
 
 export type PortalCloudDatabase = {
+  createFeedbackComment(record: FeedbackComment): Promise<FeedbackComment>;
   createShareLink(ownerEmail: string, record: PortalShareLinkRecord): Promise<PortalShareLinkRecord>;
   findReusableShareLink(
     ownerEmail: string,
     match: PortalShareLinkMatch,
   ): Promise<PortalShareLinkRecord | null>;
   getShareLink(token: string): Promise<(PortalShareLinkRecord & { ownerEmail: string }) | null>;
+  getFeedbackComment(ownerEmail: string, id: string): Promise<FeedbackComment | null>;
+  getFeedbackCountsByVideo(ownerEmail: string): Promise<FeedbackVideoSummary[]>;
+  listFeedbackForShareToken(token: string, videoId: string): Promise<FeedbackComment[]>;
+  listFeedbackForVideo(ownerEmail: string, videoId: string): Promise<FeedbackComment[]>;
   listProjects(ownerEmail: string): Promise<PortalData>;
+  markVideoFeedbackRead(ownerEmail: string, videoId: string, readAt: string): Promise<void>;
   replaceProjects(ownerEmail: string, data: PortalData): Promise<PortalData>;
   revokeShareLink(token: string, revokedAt: string): Promise<boolean>;
+  updateFeedbackComment(
+    ownerEmail: string,
+    id: string,
+    patch: FeedbackCommentPatch,
+  ): Promise<FeedbackComment | null>;
 };
 
 export type PortalApiRuntime = {
@@ -762,6 +781,10 @@ async function handlePublicShare(
     return resolved;
   }
 
+  if (pathParts.length === 5 && pathParts[4] === "comments") {
+    return handlePublicFeedbackApi(request, runtime, resolved);
+  }
+
   if (request.method === "GET" && pathParts.length === 4) {
     if (resolved.passcodeHash) {
       return jsonResponse({
@@ -836,6 +859,13 @@ export async function handlePortalApiRequest(
       return handleAdminShareLinks(request, runtime, authorization, pathParts);
     }
 
+    if (
+      pathParts[2] === "feedback" ||
+      (pathParts[2] === "videos" && pathParts[4] === "feedback")
+    ) {
+      return handleAdminFeedbackApi(request, runtime, authorization, pathParts);
+    }
+
     return errorResponse(404, "not_found", "Admin API route not found.");
   }
 
@@ -848,7 +878,13 @@ export async function handlePortalApiRequest(
 
 export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
   private readonly dataByOwnerEmail = new Map<string, PortalData>();
+  private readonly feedbackComments = new Map<string, FeedbackComment>();
   private readonly shareLinks = new Map<string, PortalShareLinkRecord & { ownerEmail: string }>();
+
+  async createFeedbackComment(record: FeedbackComment): Promise<FeedbackComment> {
+    this.feedbackComments.set(record.id, clone(record));
+    return clone(record);
+  }
 
   async createShareLink(
     ownerEmail: string,
@@ -892,6 +928,91 @@ export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
     return record ? clone(record) : null;
   }
 
+  async getFeedbackComment(ownerEmail: string, id: string): Promise<FeedbackComment | null> {
+    const record = this.feedbackComments.get(id);
+
+    if (!record || !this.ownerHasProject(ownerEmail, record.projectId)) {
+      return null;
+    }
+
+    return clone(record);
+  }
+
+  async getFeedbackCountsByVideo(ownerEmail: string): Promise<FeedbackVideoSummary[]> {
+    const summaries = new Map<string, FeedbackVideoSummary>();
+
+    for (const comment of this.feedbackComments.values()) {
+      if (
+        comment.parentId ||
+        comment.deletedAt ||
+        !this.ownerHasProject(ownerEmail, comment.projectId)
+      ) {
+        continue;
+      }
+
+      const summary = summaries.get(comment.videoId) ?? {
+        openCount: 0,
+        projectId: comment.projectId,
+        resolvedCount: 0,
+        unreadCount: 0,
+        videoId: comment.videoId,
+      };
+
+      if (comment.status === "resolved") {
+        summary.resolvedCount += 1;
+      } else {
+        summary.openCount += 1;
+      }
+      if (comment.authorRole === "guest" && !comment.adminReadAt) {
+        summary.unreadCount += 1;
+      }
+
+      summaries.set(comment.videoId, summary);
+    }
+
+    return Array.from(summaries.values()).sort((left, right) =>
+      left.videoId.localeCompare(right.videoId),
+    );
+  }
+
+  async listFeedbackForShareToken(token: string, videoId: string): Promise<FeedbackComment[]> {
+    return Array.from(this.feedbackComments.values())
+      .filter(
+        (comment) => {
+          const parent = comment.parentId ? this.feedbackComments.get(comment.parentId) : null;
+
+          return (
+            comment.shareToken === token &&
+            comment.videoId === videoId &&
+            !comment.deletedAt &&
+            (!comment.parentId || Boolean(parent && !parent.deletedAt))
+          );
+        },
+      )
+      .sort(
+        (left, right) =>
+          left.timestampSeconds - right.timestampSeconds ||
+          left.createdAt.localeCompare(right.createdAt),
+      )
+      .map(clone);
+  }
+
+  async listFeedbackForVideo(ownerEmail: string, videoId: string): Promise<FeedbackComment[]> {
+    return Array.from(this.feedbackComments.values())
+      .filter((comment) => {
+        const parent = comment.parentId ? this.feedbackComments.get(comment.parentId) : null;
+
+        return (
+          comment.videoId === videoId &&
+          !comment.deletedAt &&
+          (!comment.parentId || Boolean(parent && !parent.deletedAt)) &&
+          this.ownerHasProject(ownerEmail, comment.projectId)
+        );
+      })
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map(clone);
+  }
+
   getRawShareToken(token: string): (PortalShareLinkRecord & { ownerEmail: string }) | null {
     return this.shareLinks.get(token) ?? null;
   }
@@ -907,6 +1028,28 @@ export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
     this.dataByOwnerEmail.set(normalizedOwner, clonedData);
 
     return clone(clonedData);
+  }
+
+  async markVideoFeedbackRead(
+    ownerEmail: string,
+    videoId: string,
+    readAt: string,
+  ): Promise<void> {
+    for (const [id, comment] of this.feedbackComments) {
+      if (
+        comment.videoId === videoId &&
+        !comment.parentId &&
+        !comment.deletedAt &&
+        comment.authorRole === "guest" &&
+        this.ownerHasProject(ownerEmail, comment.projectId)
+      ) {
+        this.feedbackComments.set(id, {
+          ...comment,
+          adminReadAt: readAt,
+          updatedAt: readAt,
+        });
+      }
+    }
   }
 
   async revokeShareLink(token: string, revokedAt: string): Promise<boolean> {
@@ -933,6 +1076,30 @@ export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
         revokedAt: new Date().toISOString(),
       });
     }
+  }
+
+  async updateFeedbackComment(
+    ownerEmail: string,
+    id: string,
+    patch: FeedbackCommentPatch,
+  ): Promise<FeedbackComment | null> {
+    const current = this.feedbackComments.get(id);
+
+    if (!current || !this.ownerHasProject(ownerEmail, current.projectId)) {
+      return null;
+    }
+
+    const updated = { ...current, ...patch };
+    this.feedbackComments.set(id, updated);
+    return clone(updated);
+  }
+
+  private ownerHasProject(ownerEmail: string, projectId: string): boolean {
+    return Boolean(
+      this.dataByOwnerEmail
+        .get(normalizeAdminEmail(ownerEmail))
+        ?.projects.some((project) => project.id === projectId),
+    );
   }
 }
 
@@ -975,6 +1142,14 @@ type ShareLinkRow = {
   revoked_at: string | null;
   token: string;
   video_id: string | null;
+};
+
+type FeedbackSummaryRow = {
+  open_count: number;
+  project_id: string;
+  resolved_count: number;
+  unread_count: number;
+  video_id: string;
 };
 
 function optionalString(value: string | null): string | undefined {
@@ -1022,6 +1197,39 @@ export function createD1PortalDatabase(db: D1DatabaseLike): PortalCloudDatabase 
 
 class D1PortalCloudDatabase implements PortalCloudDatabase {
   constructor(private readonly db: D1DatabaseLike) {}
+
+  async createFeedbackComment(record: FeedbackComment): Promise<FeedbackComment> {
+    await this.db
+      .prepare(
+        `INSERT INTO feedback_comments (
+          id, share_token, project_id, video_id, parent_id, author_name, author_email,
+          author_role, body, timestamp_seconds, position_x, position_y, status,
+          admin_read_at, created_at, updated_at, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        record.id,
+        record.shareToken,
+        record.projectId,
+        record.videoId,
+        record.parentId ?? null,
+        record.authorName,
+        record.authorEmail ?? null,
+        record.authorRole,
+        record.body,
+        record.timestampSeconds,
+        record.positionX ?? null,
+        record.positionY ?? null,
+        record.status,
+        record.adminReadAt ?? null,
+        record.createdAt,
+        record.updatedAt,
+        record.deletedAt ?? null,
+      )
+      .run();
+
+    return clone(record);
+  }
 
   async createShareLink(
     ownerEmail: string,
@@ -1098,6 +1306,84 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
       .first<ShareLinkRow>();
 
     return row ? mapShareLinkRow(row) : null;
+  }
+
+  async getFeedbackComment(ownerEmail: string, id: string): Promise<FeedbackComment | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT feedback_comments.*
+          FROM feedback_comments
+          INNER JOIN projects ON projects.id = feedback_comments.project_id
+          WHERE feedback_comments.id = ? AND projects.owner_email = ?`,
+      )
+      .bind(id, ownerEmail)
+      .first<FeedbackCommentRow>();
+
+    return row ? mapFeedbackCommentRow(row) : null;
+  }
+
+  async getFeedbackCountsByVideo(ownerEmail: string): Promise<FeedbackVideoSummary[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT feedback_comments.project_id, feedback_comments.video_id,
+          SUM(CASE WHEN feedback_comments.status = 'open' THEN 1 ELSE 0 END) AS open_count,
+          SUM(CASE WHEN feedback_comments.status = 'resolved' THEN 1 ELSE 0 END) AS resolved_count,
+          SUM(CASE WHEN feedback_comments.author_role = 'guest'
+            AND feedback_comments.admin_read_at IS NULL THEN 1 ELSE 0 END) AS unread_count
+          FROM feedback_comments
+          INNER JOIN projects ON projects.id = feedback_comments.project_id
+          WHERE projects.owner_email = ?
+            AND feedback_comments.parent_id IS NULL
+            AND feedback_comments.deleted_at IS NULL
+          GROUP BY feedback_comments.project_id, feedback_comments.video_id
+          ORDER BY feedback_comments.video_id ASC`,
+      )
+      .bind(ownerEmail)
+      .all<FeedbackSummaryRow>();
+
+    return (result.results ?? []).map((row) => ({
+      openCount: Number(row.open_count),
+      projectId: row.project_id,
+      resolvedCount: Number(row.resolved_count),
+      unreadCount: Number(row.unread_count),
+      videoId: row.video_id,
+    }));
+  }
+
+  async listFeedbackForShareToken(token: string, videoId: string): Promise<FeedbackComment[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT * FROM feedback_comments
+          WHERE share_token = ? AND video_id = ? AND deleted_at IS NULL
+            AND (parent_id IS NULL OR parent_id IN (
+              SELECT id FROM feedback_comments WHERE deleted_at IS NULL
+            ))
+          ORDER BY timestamp_seconds ASC, created_at ASC`,
+      )
+      .bind(token, videoId)
+      .all<FeedbackCommentRow>();
+
+    return (result.results ?? []).map(mapFeedbackCommentRow);
+  }
+
+  async listFeedbackForVideo(ownerEmail: string, videoId: string): Promise<FeedbackComment[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT feedback_comments.*
+          FROM feedback_comments
+          INNER JOIN projects ON projects.id = feedback_comments.project_id
+          WHERE projects.owner_email = ?
+            AND feedback_comments.video_id = ?
+            AND feedback_comments.deleted_at IS NULL
+            AND (feedback_comments.parent_id IS NULL OR feedback_comments.parent_id IN (
+              SELECT id FROM feedback_comments WHERE deleted_at IS NULL
+            ))
+          ORDER BY feedback_comments.created_at DESC`,
+      )
+      .bind(ownerEmail, videoId)
+      .all<FeedbackCommentRow>();
+
+    return (result.results ?? []).map(mapFeedbackCommentRow);
   }
 
   async listProjects(ownerEmail: string): Promise<PortalData> {
@@ -1245,6 +1531,25 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
     return clone(data);
   }
 
+  async markVideoFeedbackRead(
+    ownerEmail: string,
+    videoId: string,
+    readAt: string,
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE feedback_comments
+          SET admin_read_at = ?, updated_at = ?
+          WHERE video_id = ?
+            AND parent_id IS NULL
+            AND author_role = 'guest'
+            AND deleted_at IS NULL
+            AND project_id IN (SELECT id FROM projects WHERE owner_email = ?)`,
+      )
+      .bind(readAt, readAt, videoId, ownerEmail)
+      .run();
+  }
+
   async revokeShareLink(token: string, revokedAt: string): Promise<boolean> {
     await this.db
       .prepare("UPDATE share_links SET revoked_at = ? WHERE token = ?")
@@ -1252,5 +1557,33 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
       .run();
 
     return true;
+  }
+
+  async updateFeedbackComment(
+    ownerEmail: string,
+    id: string,
+    patch: FeedbackCommentPatch,
+  ): Promise<FeedbackComment | null> {
+    await this.db
+      .prepare(
+        `UPDATE feedback_comments SET
+          status = COALESCE(?, status),
+          admin_read_at = COALESCE(?, admin_read_at),
+          deleted_at = COALESCE(?, deleted_at),
+          updated_at = ?
+          WHERE id = ?
+            AND project_id IN (SELECT id FROM projects WHERE owner_email = ?)`,
+      )
+      .bind(
+        patch.status ?? null,
+        patch.adminReadAt ?? null,
+        patch.deletedAt ?? null,
+        patch.updatedAt,
+        id,
+        ownerEmail,
+      )
+      .run();
+
+    return this.getFeedbackComment(ownerEmail, id);
   }
 }

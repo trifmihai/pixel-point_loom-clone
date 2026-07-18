@@ -39,6 +39,7 @@ const videoRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/video/$slug",
   validateSearch: (search: Record<string, unknown>) => ({
+    comment: typeof search.comment === "string" && search.comment.trim() ? search.comment : undefined,
     data: typeof search.data === "string" ? search.data : undefined,
   }),
 });
@@ -52,9 +53,9 @@ function ShareRoute(): React.JSX.Element {
 
 function VideoRoute(): React.JSX.Element {
   const { slug } = videoRoute.useParams();
-  const { data } = videoRoute.useSearch();
+  const { comment, data } = videoRoute.useSearch();
 
-  return <VideoSharePortal encodedData={data} slug={slug} />;
+  return <VideoSharePortal directCommentId={comment} encodedData={data} slug={slug} />;
 }
 
 export const routeTree = rootRoute.addChildren([indexRoute, adminRoute, shareRoute, videoRoute]);

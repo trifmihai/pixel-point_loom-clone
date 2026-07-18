@@ -479,4 +479,285 @@ describe("portal cloud API", () => {
       "client-pass",
     );
   });
+
+  it("creates and lists token-scoped public feedback without exposing private fields", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const created = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments", {
+        body: JSON.stringify({
+          authorEmail: "guest@example.com",
+          authorName: "Mira",
+          body: "Please tighten this transition.",
+          positionX: 23.5,
+          positionY: 67,
+          timestampSeconds: 41.25,
+          videoId: "video_1",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const listed = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments?videoId=video_1"),
+      runtime,
+    );
+    const createdBody = await json<Record<string, unknown>>(created);
+    const listedBody = await json<{ comments: Array<Record<string, unknown>> }>(listed);
+
+    expect(created.status).toBe(201);
+    expect(createdBody).toMatchObject({
+      authorName: "Mira",
+      body: "Please tighten this transition.",
+      positionX: 23.5,
+      positionY: 67,
+      timestampSeconds: 41.25,
+      videoId: "video_1",
+    });
+    expect(createdBody).not.toHaveProperty("authorEmail");
+    expect(createdBody).not.toHaveProperty("adminReadAt");
+    expect(listed.status).toBe(200);
+    expect(listedBody.comments).toHaveLength(1);
+    expect(JSON.stringify(listedBody)).not.toContain("guest@example.com");
+  });
+
+  it("validates public feedback and enforces video scope for video and project tokens", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const invalid = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments", {
+        body: JSON.stringify({
+          authorEmail: "bad-email",
+          authorName: "",
+          body: "",
+          positionX: -1,
+          positionY: 101,
+          timestampSeconds: -1,
+          videoId: "video_1",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const wrongVideo = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments", {
+        body: JSON.stringify({
+          authorName: "Mira",
+          body: "Wrong scope",
+          positionX: 10,
+          positionY: 10,
+          timestampSeconds: 1,
+          videoId: "video_other",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const projectTokenValid = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_2/comments", {
+        body: JSON.stringify({
+          authorName: "Mira",
+          body: "Project token comment",
+          positionX: 10,
+          positionY: 10,
+          timestampSeconds: 1,
+          videoId: "video_1",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    expect(invalid.status).toBe(400);
+    expect(wrongVideo.status).toBe(404);
+    expect(projectTokenValid.status).toBe(201);
+  });
+
+  it("requires the share passcode for protected feedback requests", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({
+          passcode: "client-pass",
+          projectId: "project_1",
+          videoId: "video_1",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const blocked = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments?videoId=video_1"),
+      runtime,
+    );
+    const unlocked = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments?videoId=video_1", {
+        headers: { "X-Share-Passcode": "client-pass" },
+      }),
+      runtime,
+    );
+
+    expect(blocked.status).toBe(403);
+    expect(unlocked.status).toBe(200);
+  });
+
+  it("summarizes unread feedback and supports the complete admin feedback workflow", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const guest = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments", {
+        body: JSON.stringify({
+          authorEmail: "guest@example.com",
+          authorName: "Mira",
+          body: "Please tighten this transition.",
+          positionX: 23.5,
+          positionY: 67,
+          timestampSeconds: 41.25,
+          videoId: "video_1",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const guestBody = await json<{ id: string }>(guest);
+
+    const unauthorized = await handlePortalApiRequest(
+      createRequest("/api/admin/feedback"),
+      runtime,
+    );
+    const summaryBefore = await handlePortalApiRequest(
+      createAdminRequest("/api/admin/feedback", sessionCookie),
+      runtime,
+    );
+    const videoFeedback = await handlePortalApiRequest(
+      createAdminRequest("/api/admin/videos/video_1/feedback", sessionCookie),
+      runtime,
+    );
+    const reply = await handlePortalApiRequest(
+      createAdminRequest(`/api/admin/feedback/${guestBody.id}/replies`, sessionCookie, {
+        body: JSON.stringify({ body: "Thanks, I will update it." }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const resolved = await handlePortalApiRequest(
+      createAdminRequest(`/api/admin/feedback/${guestBody.id}`, sessionCookie, {
+        body: JSON.stringify({ status: "resolved" }),
+        method: "PATCH",
+      }),
+      runtime,
+    );
+    const markedRead = await handlePortalApiRequest(
+      createAdminRequest("/api/admin/videos/video_1/feedback/read", sessionCookie, {
+        method: "POST",
+      }),
+      runtime,
+    );
+    const summaryAfter = await handlePortalApiRequest(
+      createAdminRequest("/api/admin/feedback", sessionCookie),
+      runtime,
+    );
+
+    expect(unauthorized.status).toBe(401);
+    await expect(json(summaryBefore)).resolves.toMatchObject({
+      videos: [
+        {
+          openCount: 1,
+          resolvedCount: 0,
+          unreadCount: 1,
+          videoId: "video_1",
+        },
+      ],
+    });
+    expect(videoFeedback.status).toBe(200);
+    expect(JSON.stringify(await json(videoFeedback))).toContain("guest@example.com");
+    expect(reply.status).toBe(201);
+    expect(resolved.status).toBe(200);
+    expect(markedRead.status).toBe(200);
+    await expect(json(summaryAfter)).resolves.toMatchObject({
+      videos: [
+        {
+          openCount: 0,
+          resolvedCount: 1,
+          unreadCount: 0,
+          videoId: "video_1",
+        },
+      ],
+    });
+
+    const deleted = await handlePortalApiRequest(
+      createAdminRequest(`/api/admin/feedback/${guestBody.id}`, sessionCookie, {
+        body: JSON.stringify({ deleted: true }),
+        method: "PATCH",
+      }),
+      runtime,
+    );
+    const publicAfterDelete = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments?videoId=video_1"),
+      runtime,
+    );
+
+    expect(deleted.status).toBe(200);
+    await expect(json(publicAfterDelete)).resolves.toEqual({ comments: [] });
+  });
 });

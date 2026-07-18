@@ -5,8 +5,11 @@ import type { PortalVideo } from "./portal-types";
 import { buildGumletEmbedUrl } from "./portal-utils";
 import {
   buildGumletDurationCommands,
+  buildGumletCurrentTimeCommands,
+  buildGumletPauseCommands,
   buildGumletReviewVerificationCommands,
   buildGumletSpeedCommands,
+  buildGumletSeekCommands,
   buildGumletStartCommands,
   buildGumletSubscriptionCommands,
   gumletPlayerOrigin,
@@ -17,6 +20,7 @@ import {
 
 type GumletPlayerProps = {
   autoplay?: boolean;
+  onCurrentTime?: (currentTimeSeconds: number) => void;
   onDuration?: (durationSeconds: number) => void;
   onPlaybackEvent?: (message: GumletPlayerMessage) => void;
   onReady?: () => void;
@@ -30,7 +34,10 @@ const gumletPlayerLoadingTimeoutMs = 6500;
 
 export type GumletPlayerHandle = {
   applyRecommendedSpeed: () => void;
+  pause: () => void;
+  requestCurrentTime: () => void;
   requestDuration: () => void;
+  seekTo: (seconds: number) => void;
   startReview: () => void;
 };
 
@@ -46,13 +53,14 @@ function useLatestValue<TValue>(value: TValue): React.RefObject<TValue> {
 
 export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerProps>(
   function GumletPlayer(
-    { autoplay = false, onDuration, onPlaybackEvent, onReady, seekSeconds, video },
+    { autoplay = false, onCurrentTime, onDuration, onPlaybackEvent, onReady, seekSeconds, video },
     ref,
   ): React.JSX.Element {
     const frameRef = React.useRef<HTMLIFrameElement | null>(null);
     const readyRef = React.useRef(false);
     const [playerState, setPlayerState] = React.useState<GumletPlayerState>("loading");
     const onDurationRef = useLatestValue(onDuration);
+    const onCurrentTimeRef = useLatestValue(onCurrentTime);
     const onPlaybackEventRef = useLatestValue(onPlaybackEvent);
     const onReadyRef = useLatestValue(onReady);
     const startTime = seekSeconds ?? video.startTimeSeconds ?? 0;
@@ -80,6 +88,18 @@ export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerPro
     postGumletCommands(frameRef.current, buildGumletDurationCommands());
   }, []);
 
+  const requestCurrentTime = React.useCallback(() => {
+    postGumletCommands(frameRef.current, buildGumletCurrentTimeCommands());
+  }, []);
+
+  const pause = React.useCallback(() => {
+    postGumletCommands(frameRef.current, buildGumletPauseCommands());
+  }, []);
+
+  const seekTo = React.useCallback((seconds: number) => {
+    postGumletCommands(frameRef.current, buildGumletSeekCommands(seconds));
+  }, []);
+
   const startReview = React.useCallback(() => {
     postGumletCommands(frameRef.current, buildGumletStartCommands(video.recommendedPlaybackSpeed));
 
@@ -96,10 +116,13 @@ export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerPro
     ref,
     () => ({
       applyRecommendedSpeed,
+      pause,
+      requestCurrentTime,
       requestDuration,
+      seekTo,
       startReview,
     }),
-    [applyRecommendedSpeed, requestDuration, startReview],
+    [applyRecommendedSpeed, pause, requestCurrentTime, requestDuration, seekTo, startReview],
   );
 
   React.useEffect(() => {
@@ -109,6 +132,10 @@ export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerPro
       }
 
       const message = parseGumletPlayerMessage(event.data);
+
+      if (message.currentTimeSeconds !== undefined) {
+        onCurrentTimeRef.current?.(message.currentTimeSeconds);
+      }
 
       if (message.durationSeconds) {
         onDurationRef.current?.(message.durationSeconds);
@@ -144,7 +171,8 @@ export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerPro
       if (message.isReady) {
         subscribeToPlayerEvents();
         applyRecommendedSpeed();
-        requestDuration();
+          requestDuration();
+          requestCurrentTime();
       }
     }
 
@@ -154,8 +182,10 @@ export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerPro
   }, [
     applyRecommendedSpeed,
     onDurationRef,
+    onCurrentTimeRef,
     onPlaybackEventRef,
     requestDuration,
+    requestCurrentTime,
     setPlayerReady,
     subscribeToPlayerEvents,
   ]);

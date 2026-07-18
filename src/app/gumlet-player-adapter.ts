@@ -5,6 +5,7 @@ export const gumletPlayerOrigin = "https://play.gumlet.io";
 type GumletCommand = Record<string, unknown> | string;
 
 export type GumletPlayerMessage = {
+  currentTimeSeconds?: number;
   durationSeconds?: number;
   error?: boolean;
   isReady?: boolean;
@@ -27,6 +28,16 @@ function normalizeDuration(value: unknown): number | undefined {
   }
 
   return Math.round(parsed);
+}
+
+function normalizeCurrentTime(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : Number(value);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+
+  return parsed;
 }
 
 function parseMessageData(value: unknown): unknown {
@@ -131,8 +142,16 @@ export function parseGumletPlayerMessage(value: unknown): GumletPlayerMessage {
   const volume = normalizeVolume(
     eventName === "getVolume" ? payload : payloadRecord?.volume ?? record.volume,
   );
+  const currentTimeSeconds = normalizeCurrentTime(
+    eventName === "getCurrentTime"
+      ? payload
+      : eventName === "timeupdate"
+        ? payloadRecord?.seconds ?? payloadRecord?.currentTime ?? payload
+        : payloadRecord?.currentTime ?? record.currentTime,
+  );
 
   return compactMessage({
+    currentTimeSeconds,
     durationSeconds:
       eventName === "getDuration" ? normalizeDuration(payload) ?? durationSeconds : durationSeconds,
     error: eventName === "error" ? true : undefined,
@@ -169,12 +188,42 @@ export function buildGumletDurationCommands(): GumletCommand[] {
   ];
 }
 
+export function buildGumletCurrentTimeCommands(): GumletCommand[] {
+  return [
+    buildPlayerJsCommand("getCurrentTime", undefined, "get-current-time"),
+    { type: "getCurrentTime" },
+    { method: "getCurrentTime" },
+    { event: "command", func: "getCurrentTime", args: [] },
+  ];
+}
+
+export function buildGumletPauseCommands(): GumletCommand[] {
+  return [
+    buildPlayerJsCommand("pause", undefined, "review-pause"),
+    { type: "pause" },
+    { method: "pause" },
+    { event: "command", func: "pause", args: [] },
+  ];
+}
+
+export function buildGumletSeekCommands(seconds: number): GumletCommand[] {
+  const safeSeconds = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+
+  return [
+    buildPlayerJsCommand("setCurrentTime", safeSeconds, "review-seek"),
+    { type: "setCurrentTime", currentTime: safeSeconds },
+    { method: "setCurrentTime", value: safeSeconds },
+    { event: "command", func: "setCurrentTime", args: [safeSeconds] },
+  ];
+}
+
 export function buildGumletSubscriptionCommands(): GumletCommand[] {
   return [
     buildPlayerJsCommand("addEventListener", "play", "listen-play"),
     buildPlayerJsCommand("addEventListener", "playbackRateChange", "listen-playback-rate"),
     buildPlayerJsCommand("addEventListener", "volumeChange", "listen-volume"),
     buildPlayerJsCommand("addEventListener", "error", "listen-error"),
+    buildPlayerJsCommand("addEventListener", "timeupdate", "listen-time-update"),
   ];
 }
 
