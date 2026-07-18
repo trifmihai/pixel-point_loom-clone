@@ -72,12 +72,7 @@ const playbackSpeedItems = playbackSpeedOptions.map((speed) => ({
 
 export function PortalBrand({ compact = false, context }: PortalBrandProps): React.JSX.Element {
   return (
-    <div className="flex min-w-0 items-center gap-3" translate="no">
-      <span aria-hidden="true" className="portal-brand-mark">
-        <span />
-        <span />
-        <span />
-      </span>
+    <div className="flex min-w-0 items-center" translate="no">
       <span className="min-w-0">
         <span className="block text-sm font-semibold tracking-[-0.015em] text-white">
           Pixel Point

@@ -232,6 +232,23 @@ The app is now the Pixel Point video-sharing portal with local fallback plus Clo
 - Skipped checks: Full browser performance checkpoint is not required for this post-first-working low-count DOM/API feature. It adds no custom renderer, Toolcraft canvas, export, animation, or reported performance problem; functional mobile browser checks cover the touched interaction/layout paths.
 - Risks: Production requires applying `0002_feedback_comments.sql` before the new endpoints are used. Gumlet timestamp capture depends on player.js current-time events and falls back to the last reported time until a response arrives. Rate limiting is the existing per-isolate in-memory Pages Function limiter, appropriate for basic V1 abuse protection but not a global quota.
 
+### Iteration 14 - Text-only portal identity
+
+- Request: Remove the logo from every flow and screen, using the annotated admin screenshot as the concrete target, then publish the change.
+- Task type: Tier 1 shared presentation change with a full final gate because the result will be published to production.
+- User-visible result: Admin sign-in, desktop/mobile admin navigation, protected share access, collection shares, and single-video shares keep the Pixel Point name and context text but no longer render the decorative three-bar logo mark.
+- Source/reference checked: The annotated user screenshot, the shared `PortalBrand` component, all five app consumers, the brand-mark CSS rules, existing portal presentation tests, and functional Playwright coverage.
+- Reference inputs: `C:/Users/Mike/AppData/Local/Temp/codex-clipboard-24c9d2cb-5c96-41d5-9e82-6e15c4f997d1.png`. No Figma URL, video, GIF, screen recording, contact sheet, or extracted frames were supplied.
+- Docs/contracts read: `AGENTS.md`, `docs/toolcraft/workflow.md`, `assembly-workflow.md`, `decision-contract.md`, `acceptance-testing.md`, plus the required brainstorming, writing-plans, test-driven-development, and browser workflow skills.
+- Contract rules applied: Keep route/runtime/auth/data behavior unchanged, preserve the shared component boundary, remove dead presentation CSS, test the visible result through real routes, and avoid runtime/schema/control/canvas/export changes for a brand-only request.
+- Decision: Interpret the screenshot arrow as removal of the graphic mark while retaining the Pixel Point wordmark and context labels. Remove it once in `PortalBrand` so every current and future consumer inherits the text-only identity.
+- Alternatives rejected: Removing the Pixel Point name because the screenshot targets only the icon; hiding the mark independently in each route because that would drift; leaving unused logo CSS because the mark is intentionally removed from the product.
+- State/output mapping: `PortalBrand` owns the identity rendered by admin auth, admin navigation, passcode access, collection shares, and video shares. Removing its decorative child and CSS changes only visible presentation; props, routes, runtime state, persistence, API, D1, playback, feedback, and exports are untouched.
+- Files changed: `src/app/portal-ui.tsx`, `src/styles.css`, `src/app/portal-ui.test.ts`, `e2e/app-browser-acceptance.spec.ts`, the text-only brand spec/plan, and this worklog. No `src/toolcraft`, schema, API, migration, or dependency files change.
+- Verification: The new Vitest assertion failed first because `portal-brand-mark` remained in shared markup. The focused Playwright test then failed with two visible marks on `/admin`. After the minimal shared removal, all 5 focused Vitest cases passed and the cross-flow Playwright scenario passed on admin, collection-share, and single-video routes. `npm.cmd run verify:final` completed with exit code 0: AI/docs/integrity checks, 12 Node tests, all 77 Vitest tests, TypeScript, the production Vite build, and all 18 functional Playwright scenarios passed against the verified same-app server.
+- Skipped checks: Full browser performance is not required for this post-first-working presentation-only deletion. The change removes four static DOM elements and CSS and adds no workload, animation, canvas, export, media, or interaction path.
+- Risks: None. All logo-bearing flows consume the same component, and automated source coverage fails if the removed mark or CSS is reintroduced.
+
 ## Decisions
 
 ### Renderer

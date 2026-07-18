@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 
 const portalUiPath = path.resolve(process.cwd(), "src/app/portal-ui.tsx");
 const adminAuthGatePath = path.resolve(process.cwd(), "src/app/admin-auth-gate.tsx");
+const adminPortalPath = path.resolve(process.cwd(), "src/app/admin-portal.tsx");
 const sharePasscodeGatePath = path.resolve(process.cwd(), "src/app/share-passcode-gate.tsx");
+const sharePortalPath = path.resolve(process.cwd(), "src/app/share-portal.tsx");
+const videoSharePortalPath = path.resolve(process.cwd(), "src/app/video-share-portal.tsx");
 const stylesPath = path.resolve(process.cwd(), "src/styles.css");
 
 function readPortalUiSource(): string {
@@ -54,5 +57,25 @@ describe("Pixel Point portal presentation layer", () => {
     expect(adminGate).toContain('name="password"');
     expect(passcodeGate).toContain("PortalBrand");
     expect(passcodeGate).toContain('name="passcode"');
+  });
+
+  it("keeps every portal flow on the text-only Pixel Point identity", () => {
+    const portalUi = readPortalUiSource();
+    const styles = readFileSync(stylesPath, "utf8");
+    const identityConsumers = [
+      adminAuthGatePath,
+      adminPortalPath,
+      sharePasscodeGatePath,
+      sharePortalPath,
+      videoSharePortalPath,
+    ];
+
+    expect(portalUi).toContain("Pixel Point");
+    expect(portalUi).not.toContain("portal-brand-mark");
+    expect(styles).not.toContain(".portal-brand-mark");
+
+    for (const consumerPath of identityConsumers) {
+      expect(readFileSync(consumerPath, "utf8")).toContain("PortalBrand");
+    }
   });
 });

@@ -48,6 +48,28 @@ test("browser: root redirects to the protected admin route", async ({ page }) =>
   await expect(page.getByText("Create your first project")).toBeVisible();
 });
 
+test("browser: portal identity is text-only across admin and public flows", async ({ page }) => {
+  await page.goto("/admin");
+  await expect(page.locator(".portal-brand-mark")).toHaveCount(0);
+  await expect(page.getByText("Pixel Point").first()).toBeVisible();
+
+  const encodedProject = encodeShareProject(shareProjectFixture);
+  await page.goto(`/share/${shareProjectFixture.shareSlug}?data=${encodedProject}`);
+  await expect(page.locator(".portal-brand-mark")).toHaveCount(0);
+  await expect(page.getByText("Pixel Point").first()).toBeVisible();
+
+  const videoShareUrl = createVideoShareUrl(
+    shareProjectFixture,
+    shareProjectFixture.videos[0]!,
+    "http://127.0.0.1:3002",
+  );
+  const videoUrl = new URL(videoShareUrl);
+
+  await page.goto(`${videoUrl.pathname}${videoUrl.search}`);
+  await expect(page.locator(".portal-brand-mark")).toHaveCount(0);
+  await expect(page.getByText("Pixel Point").first()).toBeVisible();
+});
+
 test("browser: old hash video links are replaced with clean public paths", async ({ page }) => {
   await page.route("**/api/public/share/video_token", async (route) => {
     await route.fulfill({
