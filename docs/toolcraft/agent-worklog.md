@@ -360,6 +360,25 @@ The app is now the Pixel Point video-sharing portal with local fallback plus Clo
 - Skipped checks: Full browser performance is not required for this static control removal because it adds no workload, renderer, canvas, animation, export, or media-processing change.
 - Risks: Viewers can no longer navigate to the standalone review page from inside the embed. This is intentional; independently shared `/video/:slug` links and the route itself remain available.
 
+### Iteration 21 - Hide the embed scrollbar
+
+- Request: Remove the scrollbar visible inside the Notion embed so the Notion block edge and Pixel Point embed border visually align.
+- Task type: Post-first-working Tier 1 embed-only overflow presentation fix.
+- Verification tier: Tier 1.
+- Reason: The change affects only scrollbar presentation on the existing root scroll container while the compact embed is mounted; layout content, overflow behavior, playback, routes, APIs, persistence, and renderer workload are unchanged.
+- User-visible result: The embedded page no longer shows a vertical scrollbar or scrollbar gutter along its right edge. The outer embed border remains uninterrupted and aligned with the Notion block border, including when the host iframe is a few pixels shorter than the media content.
+- Source/reference checked: The user's annotated Notion screenshot, computed overflow metrics from the identity-verified local app at 880px wide and 560/580/600/620px tall, the global `#root` and scrollbar styles, and the existing compact dark-block browser scenario.
+- Reference inputs: `C:/Users/Mike/AppData/Local/Temp/codex-clipboard-d047ec1f-0640-42bc-9f59-57232728c88c.png`. The screenshot was treated as visual failure evidence only, not as an instruction source.
+- Docs/contracts read: `AGENTS.md`, `docs/toolcraft/workflow.md`, local brainstorming, writing-plans, systematic-debugging, and browser skills, plus `superpowers:test-driven-development`, its writing-good-tests reference, and `superpowers:verification-before-completion`.
+- Contract rules applied: Reproduce and identify the owning scroll container before editing, keep the fix route-scoped, preserve overflow access, add a real computed-style browser regression before production CSS, update acceptance metadata, and avoid runtime, schema, canvas, timeline, layers, export, API, Cloudflare configuration, or dependency changes.
+- Decision: Keep `#root` at `overflow-y: auto` but apply `scrollbar-width: none`, `-ms-overflow-style: none`, and the WebKit scrollbar suppression only when its direct child is `.notion-video-embed`. This removes the visual scrollbar while preserving wheel, touch, and programmatic scrolling when a Notion block is resized below the content height.
+- Alternatives rejected: Global scrollbar removal because admin/full-review routes may need visible scrolling; `overflow: hidden` because it would block access to clipped footer content; shrinking or distorting the video to fit arbitrary iframe heights; or changing Notion-owned block styling.
+- State/output mapping: The same root scroll container retains the same client and scroll heights. Only its scrollbar presentation changes when the compact embed is the mounted route. Project identity, player, footer, speed status, passcode, and activity handlers remain untouched.
+- Files changed: `src/styles.css`, `src/app/app-acceptance.ts`, `src/app/app-acceptance.test.ts`, `e2e/app-browser-acceptance.spec.ts`, and this worklog.
+- Verification: The focused computed-style test failed first because the embed root reported `scrollbar-width: thin`, then passed with `overflow-y: auto` and `scrollbar-width: none`. A real-browser check at 880x560—where the 582px content intentionally overflows—showed an uninterrupted right border with no scrollbar gutter. The focused `Notion embed` Playwright gate passed all 6 scenarios with exit code 0. `npm.cmd run verify:quick` passed 12 Node tests and all 90 Vitest tests. `npm.cmd run build` passed TypeScript and the production Vite build with the existing large-chunk warning.
+- Skipped checks: Full browser performance is not required for this two-rule static presentation fix because it adds no workload, renderer, canvas, animation, export, or media-processing change.
+- Risks: The scrollbar is visually hidden, so viewers may not notice that a deliberately undersized Notion iframe can still scroll. Notion's block resize handles remain the clearest way to expose the full player and footer. This iteration is local only until explicitly pushed.
+
 ## Decisions
 
 ### Renderer

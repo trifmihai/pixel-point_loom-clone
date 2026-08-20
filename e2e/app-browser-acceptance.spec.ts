@@ -701,6 +701,7 @@ test("browser: Notion embed chrome matches the compact dark block around the pla
   await page.goto(new URL(embedUrl!).pathname + new URL(embedUrl!).search);
 
   const embed = page.getByTestId("notion-video-embed");
+  const root = page.locator("#root");
   const surface = embed.locator(":scope > div").first();
   const header = surface.locator("header");
   const footer = surface.locator("footer");
@@ -712,6 +713,13 @@ test("browser: Notion embed chrome matches the compact dark block around the pla
     return {
       backgroundColor: style.backgroundColor,
       fontFamily: style.fontFamily,
+    };
+  });
+  const rootPresentation = await root.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      overflowY: style.overflowY,
+      scrollbarWidth: style.scrollbarWidth,
     };
   });
   const surfacePresentation = await surface.evaluate((element) => {
@@ -729,6 +737,10 @@ test("browser: Notion embed chrome matches the compact dark block around the pla
   expect(presentation).toEqual({
     backgroundColor: "rgb(25, 25, 25)",
     fontFamily: expect.stringContaining("Segoe UI"),
+  });
+  expect(rootPresentation).toEqual({
+    overflowY: "auto",
+    scrollbarWidth: "none",
   });
   expect(surfacePresentation).toEqual({
     backgroundColor: "rgb(32, 32, 32)",

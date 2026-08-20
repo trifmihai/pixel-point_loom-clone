@@ -4,7 +4,7 @@ export const appProductReadiness = {
   productSummary:
     "A focused video-sharing workspace for organizing Gumlet videos into stable client review links.",
   requestedBehavior:
-    "Create and manage projects, add Gumlet asset IDs or links, reuse stable project and video share links, provide compact Notion dark-mode embeds that start at the recommended speed, let viewers choose playback speed in the full review, collect D1-persisted timestamped visual feedback, and notify the admin in-app after the first external playback of each cloud-shared video without changing public URL contracts.",
+    "Create and manage projects, add Gumlet asset IDs or links, reuse stable project and video share links, provide compact scrollbar-free Notion dark-mode embeds that start at the recommended speed, let viewers choose playback speed in the full review, collect D1-persisted timestamped visual feedback, and notify the admin in-app after the first external playback of each cloud-shared video without changing public URL contracts.",
 } as const;
 
 export const appAcceptance = [
@@ -28,5 +28,6 @@ export const appAcceptance = [
   "admin copies a stable Notion embed link for a shared video",
   "Notion embed exposes native playback at the recommended speed without review navigation or feedback chrome",
   "Notion embed chrome matches a compact Notion dark-mode content block",
+  "Notion embed hides its internal scrollbar without disabling overflow scrolling",
   "only the dedicated embed route permits third-party framing",
 ] as const;

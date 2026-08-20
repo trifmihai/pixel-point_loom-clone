@@ -356,3 +356,12 @@ summary,
   background-color: color-mix(in oklab, var(--foreground) 10%, transparent);
   background-clip: padding-box;
 }
+
+#root:has(> .notion-video-embed) {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+#root:has(> .notion-video-embed)::-webkit-scrollbar {
+  display: none;
+}
