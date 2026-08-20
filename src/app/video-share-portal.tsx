@@ -471,6 +471,12 @@ export function VideoSharePortal({
 
     if (message.playbackStarted) {
       recordFirstView();
+
+      if (isEmbed) {
+        setStarted(true);
+        setGumletPlaybackStatus(`Playback started. Applying ${viewerSpeed}x.`);
+        gumletPlayerRef.current?.applyRecommendedSpeed();
+      }
     }
 
     const wasActiveAttempt = gumletAttemptRef.current.active;
@@ -495,10 +501,12 @@ export function VideoSharePortal({
       !wasActiveAttempt &&
       nextAttempt.playbackStarted &&
       nextAttempt.speedConfirmed &&
-      (nextAttempt.unmutedConfirmed || nextAttempt.volumeConfirmed)
+      (isEmbed || nextAttempt.unmutedConfirmed || nextAttempt.volumeConfirmed)
     ) {
       setGumletPlaybackStatus(
-        `Playback confirmed at ${viewerSpeed}x with sound on.`,
+        isEmbed
+          ? `Playback confirmed at ${viewerSpeed}x.`
+          : `Playback confirmed at ${viewerSpeed}x with sound on.`,
       );
       return;
     }
@@ -711,7 +719,7 @@ export function VideoSharePortal({
               {videoPlayer}
             </section>
 
-            {!started ? (
+            {!started && video.directVideoUrl ? (
               <div
                 className="absolute inset-0 flex items-center justify-center bg-black/55 p-3"
                 data-testid="review-start-panel"
@@ -749,7 +757,12 @@ export function VideoSharePortal({
           <footer className="flex min-h-9 items-center justify-between gap-3 px-3 py-2 text-xs text-[color:var(--muted-foreground)] sm:px-4">
             <span>{project.clientName || "Client review"}</span>
             <PortalStatus
-              message={gumletPlaybackStatus}
+              message={
+                gumletPlaybackStatus ||
+                (!video.directVideoUrl
+                  ? `Press play in the video. Playback will switch to ${viewerSpeed}x.`
+                  : "")
+              }
               tone={gumletPlaybackStatus.startsWith("Playback confirmed") ? "success" : "default"}
             />
           </footer>

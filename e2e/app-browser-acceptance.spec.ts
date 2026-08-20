@@ -787,7 +787,7 @@ test("browser: Notion embed works inside a cross-origin parent frame", async ({ 
   await expect(embedFrame.getByRole("link", { name: "Open full review" })).toBeVisible();
 });
 
-test("browser: Gumlet Notion embed sends recommended-speed playback commands", async ({ page }) => {
+test("browser: Gumlet Notion embed exposes native playback and applies the recommended speed", async ({ page }) => {
   await page.addInitScript(() => {
     const commands: unknown[] = [];
     const fakeContentWindow = {
@@ -819,7 +819,22 @@ test("browser: Gumlet Notion embed sends recommended-speed playback commands", a
 
   await page.goto(new URL(embedUrl!).pathname + new URL(embedUrl!).search);
   await expect(page.getByTestId("notion-video-embed")).toBeVisible();
-  await page.getByRole("button", { name: /Start 1\.5x review/ }).click();
+  await expect(page.getByRole("button", { name: /Start 1\.5x review/ })).toHaveCount(0);
+  await expect(page.getByText("Press play in the video. Playback will switch to 1.5x.")).toBeVisible();
+  await expect(page.getByTitle("Checkout notes Gumlet video")).toBeVisible();
+
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: JSON.stringify({
+          context: "player.js",
+          event: "play",
+          version: "3.0",
+        }),
+        origin: "https://play.gumlet.io",
+      }),
+    );
+  });
 
   await expect
     .poll(() =>
@@ -848,7 +863,7 @@ test("browser: Gumlet Notion embed sends recommended-speed playback commands", a
         };
       }),
     )
-    .toEqual({ play: true, speed: true });
+    .toEqual({ play: false, speed: true });
 });
 
 test("browser: video page starts one shared video at selected speed from the overlay", async ({
