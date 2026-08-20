@@ -1,10 +1,9 @@
 import * as React from "react";
-import { Clock3, ExternalLink, Gauge, Play } from "lucide-react";
+import { Clock3, Gauge, Play } from "lucide-react";
 
 import {
   Badge,
   Button,
-  buttonVariants,
   Card,
   CardContent,
   CardDescription,
@@ -680,11 +679,6 @@ export function VideoSharePortal({
   ) : null;
 
   if (isEmbed) {
-    const reviewSearch = encodedData
-      ? `?${new URLSearchParams({ data: encodedData }).toString()}`
-      : "";
-    const reviewPath = `/video/${encodeURIComponent(slug)}${reviewSearch}`;
-
     return (
       <main
         className="notion-video-embed"
@@ -696,16 +690,6 @@ export function VideoSharePortal({
               <p className="notion-video-embed__project">{project.name}</p>
               <h1 className="notion-video-embed__title">{video.title}</h1>
             </div>
-            <a
-              className={`${buttonVariants({ size: "sm", variant: "ghost" })} notion-video-embed__review-link`}
-              href={reviewPath}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <ExternalLink aria-hidden="true" />
-              <span className="hidden sm:inline">Open full review</span>
-              <span className="sr-only sm:hidden">Open full review</span>
-            </a>
           </header>
 
           <div className="relative bg-black">

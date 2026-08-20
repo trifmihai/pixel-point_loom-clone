@@ -598,10 +598,7 @@ test("browser: passcode-protected review and embed routes block details until un
 
   await expect(page.getByTestId("notion-video-embed")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open full review" })).toHaveAttribute(
-    "href",
-    "/video/protected_video",
-  );
+  await expect(page.getByRole("link", { name: "Open full review" })).toHaveCount(0);
 });
 
 test("browser: Notion embed rejects project collection tokens before and after passcode unlock", async ({
@@ -671,10 +668,7 @@ test("browser: Notion embed plays the shared video in place at the recommended s
   await expect(page.getByText("Save about 4:00", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Playback speed")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Feedback" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Open full review" })).toHaveAttribute(
-    "href",
-    new URL(reviewUrl).pathname + new URL(reviewUrl).search,
-  );
+  await expect(page.getByRole("link", { name: "Open full review" })).toHaveCount(0);
 
   await page.getByRole("button", { name: /Start 1\.5x review/ }).click();
 
@@ -845,7 +839,7 @@ test("browser: Notion embed works inside a cross-origin parent frame", async ({ 
   const embedFrame = page.frameLocator('iframe[title="Notion-style embed"]');
   await expect(embedFrame.getByTestId("notion-video-embed")).toBeVisible();
   await expect(embedFrame.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
-  await expect(embedFrame.getByRole("link", { name: "Open full review" })).toBeVisible();
+  await expect(embedFrame.getByRole("link", { name: "Open full review" })).toHaveCount(0);
 });
 
 test("browser: Gumlet Notion embed exposes native playback and applies the recommended speed", async ({ page }) => {

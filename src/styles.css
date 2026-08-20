@@ -133,7 +133,6 @@ summary,
 .notion-video-embed {
   --notion-page: #191919;
   --notion-surface: #202020;
-  --notion-hover: rgb(255 255 255 / 5.5%);
   --notion-border: rgb(255 255 255 / 9.4%);
   --notion-border-strong: rgb(255 255 255 / 13%);
   --notion-text: rgb(255 255 255 / 81%);
@@ -164,11 +163,9 @@ summary,
 }
 
 .notion-video-embed__header {
-  display: grid;
+  display: flex;
   min-height: 48px;
-  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
   border-bottom: 1px solid var(--notion-border);
   padding: 6px 8px 7px 10px;
 }
@@ -199,35 +196,6 @@ summary,
   font-weight: 600;
   letter-spacing: -0.006em;
   line-height: 20px;
-}
-
-.notion-video-embed__review-link {
-  min-width: 28px;
-  height: 28px;
-  flex: none;
-  gap: 6px;
-  border-radius: 4px;
-  padding: 0 6px;
-  color: rgb(255 255 255 / 65%);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 16px;
-  text-decoration: none;
-}
-
-.notion-video-embed__review-link:hover {
-  background: var(--notion-hover);
-  color: var(--notion-text);
-}
-
-.notion-video-embed__review-link:focus-visible {
-  outline: 2px solid rgb(255 255 255 / 38%);
-  outline-offset: 1px;
-}
-
-.notion-video-embed__review-link svg {
-  width: 14px;
-  height: 14px;
 }
 
 .notion-video-embed__start-card {

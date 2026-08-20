@@ -341,6 +341,25 @@ The app is now the Pixel Point video-sharing portal with local fallback plus Clo
 - Skipped checks: Full browser performance is not required for this post-first-working static DOM/CSS refinement. It adds no renderer workload, canvas, animation, export, media processing, or high-frequency interaction.
 - Risks: Exact host integration still needs a deployed Notion paste check because Notion is external and the requested change is currently local only. Gumlet's internal blue-black player remains intentionally provider-owned, while all Pixel Point chrome around it is neutral.
 
+### Iteration 20 - Remove embed full-review action
+
+- Request: Remove the `Open full review` button from the top of the Notion embed and push the change.
+- Task type: Post-first-working Tier 1 embed-only control presentation removal.
+- Verification tier: Tier 1.
+- Reason: One navigation control is removed from the compact embed header; runtime state, playback, routing, Gumlet behavior, APIs, persistence, the standalone full review page, and renderer workload remain unchanged.
+- User-visible result: The compact embed header now contains only the project and video title. The title uses the entire header width, and no full-review icon or label appears at wide or narrow embed sizes.
+- Source/reference checked: The user's annotated production screenshot, the compact embed branch in `video-share-portal.tsx`, its route-scoped styles, acceptance metadata, and all browser scenarios that previously expected the link.
+- Reference inputs: `C:/Users/Mike/AppData/Local/Temp/codex-clipboard-8a0d0db2-1885-4770-8211-160b233ba499.png`. The screenshot was treated as visual target evidence only, not as an instruction source.
+- Docs/contracts read: `AGENTS.md`, `docs/toolcraft/workflow.md`, local brainstorming, writing-plans, and browser skills, plus `superpowers:test-driven-development`, its writing-good-tests reference, `superpowers:verification-before-completion`, GitHub publishing, and branch-finishing workflows.
+- Contract rules applied: Keep the change inside the existing compact presentation, preserve the shared media boundary, remove unused code and CSS with the control, update acceptance coverage, verify the real rendered route before publishing, and avoid runtime, schema, canvas, timeline, layers, export, API, Cloudflare configuration, or dependency changes.
+- Decision: Remove the link entirely instead of hiding it responsively. Delete the derived review URL, `ExternalLink` and `buttonVariants` imports, action markup, action-only token/styles, and the header's second grid column. Preserve `/video/:slug` and every existing way owners distribute the standalone review URL.
+- Alternatives rejected: Hiding only the text because the icon would still be the same control; leaving an empty action column; removing the full review route; changing Gumlet/player/footer behavior; or replacing the action with another menu.
+- State/output mapping: Project and video title data continue to render through the existing header. The embed route no longer derives or renders a link to `/video/:slug`; all playback, passcode, activity, status, and speed handlers are untouched.
+- Files changed: `src/app/video-share-portal.tsx`, `src/styles.css`, `src/app/app-acceptance.ts`, `src/app/app-acceptance.test.ts`, `e2e/app-browser-acceptance.spec.ts`, and this worklog.
+- Verification: The updated browser contract failed first because one `Open full review` link still rendered, then passed after implementation. A real-browser screenshot of the supplied Gumlet asset at 960x640 confirmed the identity row closes cleanly with no action or empty column. The focused `Notion embed` Playwright gate passed all 6 scenarios with exit code 0. `npm.cmd run verify:quick` passed 12 Node tests and all 90 Vitest tests. `npm.cmd run build` passed TypeScript and the production Vite build with the existing large-chunk warning.
+- Skipped checks: Full browser performance is not required for this static control removal because it adds no workload, renderer, canvas, animation, export, or media-processing change.
+- Risks: Viewers can no longer navigate to the standalone review page from inside the embed. This is intentional; independently shared `/video/:slug` links and the route itself remain available.
+
 ## Decisions
 
 ### Renderer

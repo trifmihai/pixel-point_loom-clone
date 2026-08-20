@@ -29,7 +29,7 @@ describe("portal acceptance metadata", () => {
         "admin activity shows unread first views and opens the viewed video",
         "legacy encoded links keep playback without first-view tracking",
         "admin copies a stable Notion embed link for a shared video",
-        "Notion embed exposes native playback at the recommended speed without full review chrome",
+        "Notion embed exposes native playback at the recommended speed without review navigation or feedback chrome",
         "Notion embed chrome matches a compact Notion dark-mode content block",
         "only the dedicated embed route permits third-party framing",
       ]),
