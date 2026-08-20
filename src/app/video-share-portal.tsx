@@ -687,22 +687,19 @@ export function VideoSharePortal({
 
     return (
       <main
-        className="flex min-h-dvh items-center bg-[color:var(--portal-bg)] p-2 text-white sm:p-3"
+        className="notion-video-embed"
         data-testid="notion-video-embed"
       >
-        <div className="mx-auto w-full max-w-5xl overflow-hidden rounded-xl border border-[color:var(--portal-border-strong)] bg-[color:var(--portal-surface-1)] shadow-2xl shadow-black/30">
-          <header className="flex min-w-0 items-start justify-between gap-3 border-b border-[color:var(--portal-border)] px-3 py-2.5 sm:px-4 sm:py-3">
-            <div className="min-w-0">
-              <p className="truncate text-xs font-medium text-[color:var(--muted-foreground)]">
-                {project.name}
-              </p>
-              <h1 className="truncate text-sm font-semibold text-white sm:text-base">
-                {video.title}
-              </h1>
+        <div className="notion-video-embed__surface">
+          <header className="notion-video-embed__header">
+            <div className="notion-video-embed__identity">
+              <p className="notion-video-embed__project">{project.name}</p>
+              <h1 className="notion-video-embed__title">{video.title}</h1>
             </div>
             <a
-              className={buttonVariants({ size: "sm", variant: "ghost" })}
+              className={`${buttonVariants({ size: "sm", variant: "ghost" })} notion-video-embed__review-link`}
               href={reviewPath}
+              rel="noreferrer"
               target="_blank"
             >
               <ExternalLink aria-hidden="true" />
@@ -724,9 +721,9 @@ export function VideoSharePortal({
                 className="absolute inset-0 flex items-center justify-center bg-black/55 p-3"
                 data-testid="review-start-panel"
               >
-                <div className="w-full max-w-sm rounded-xl border border-blue-300/30 bg-[color:color-mix(in_oklab,var(--portal-surface-1)_90%,transparent)] p-3 text-center shadow-2xl backdrop-blur-md sm:p-4">
+                <div className="notion-video-embed__start-card sm:p-4">
                   <div className="flex flex-col items-center gap-2.5">
-                    <Badge className="gap-2" variant="secondary">
+                    <Badge className="notion-video-embed__speed-badge gap-2" variant="secondary">
                       <Gauge aria-hidden="true" className="size-4" />
                       Recommended {viewerSpeed}x
                     </Badge>
@@ -742,7 +739,12 @@ export function VideoSharePortal({
                         <span className="block">{durationFallbackMessage}</span>
                       ) : null}
                     </div>
-                    <Button className="min-h-10 w-full" onClick={handleStart} size="lg" type="button">
+                    <Button
+                      className="notion-video-embed__start-button min-h-10 w-full"
+                      onClick={handleStart}
+                      size="lg"
+                      type="button"
+                    >
                       <Play />
                       <span>
                         {gumletStartPending ? "Starting" : "Start"} {viewerSpeed}x review
@@ -754,17 +756,23 @@ export function VideoSharePortal({
             ) : null}
           </div>
 
-          <footer className="flex min-h-9 items-center justify-between gap-3 px-3 py-2 text-xs text-[color:var(--muted-foreground)] sm:px-4">
-            <span>{project.clientName || "Client review"}</span>
-            <PortalStatus
-              message={
-                gumletPlaybackStatus ||
-                (!video.directVideoUrl
-                  ? `Press play in the video. Playback will switch to ${viewerSpeed}x.`
-                  : "")
-              }
-              tone={gumletPlaybackStatus.startsWith("Playback confirmed") ? "success" : "default"}
-            />
+          <footer className="notion-video-embed__footer">
+            <span className="notion-video-embed__client">
+              {project.clientName || "Client review"}
+            </span>
+            <div className="notion-video-embed__status">
+              <PortalStatus
+                message={
+                  gumletPlaybackStatus ||
+                  (!video.directVideoUrl
+                    ? `Press play in the video. Playback will switch to ${viewerSpeed}x.`
+                    : "")
+                }
+                tone={
+                  gumletPlaybackStatus.startsWith("Playback confirmed") ? "success" : "default"
+                }
+              />
+            </div>
           </footer>
         </div>
       </main>

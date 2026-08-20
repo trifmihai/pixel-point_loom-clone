@@ -130,6 +130,183 @@ summary,
   padding-left: max(0px, env(safe-area-inset-left));
 }
 
+.notion-video-embed {
+  --notion-page: #191919;
+  --notion-surface: #202020;
+  --notion-hover: rgb(255 255 255 / 5.5%);
+  --notion-border: rgb(255 255 255 / 9.4%);
+  --notion-border-strong: rgb(255 255 255 / 13%);
+  --notion-text: rgb(255 255 255 / 81%);
+  --notion-text-secondary: rgb(255 255 255 / 44%);
+  --notion-text-tertiary: rgb(255 255 255 / 28%);
+  --foreground: var(--notion-text);
+  --muted-foreground: var(--notion-text-secondary);
+  --border: var(--notion-border);
+  --ring: rgb(255 255 255 / 38%);
+  display: flex;
+  min-height: 100dvh;
+  align-items: flex-start;
+  background: var(--notion-page);
+  color: var(--notion-text);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.notion-video-embed__surface {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--notion-border-strong);
+  border-radius: 8px;
+  background: var(--notion-surface);
+  box-shadow: none;
+}
+
+.notion-video-embed__header {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--notion-border);
+  padding: 6px 8px 7px 10px;
+}
+
+.notion-video-embed__identity {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.notion-video-embed__project,
+.notion-video-embed__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notion-video-embed__project {
+  color: var(--notion-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.notion-video-embed__title {
+  color: var(--notion-text);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.006em;
+  line-height: 20px;
+}
+
+.notion-video-embed__review-link {
+  min-width: 28px;
+  height: 28px;
+  flex: none;
+  gap: 6px;
+  border-radius: 4px;
+  padding: 0 6px;
+  color: rgb(255 255 255 / 65%);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  text-decoration: none;
+}
+
+.notion-video-embed__review-link:hover {
+  background: var(--notion-hover);
+  color: var(--notion-text);
+}
+
+.notion-video-embed__review-link:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 38%);
+  outline-offset: 1px;
+}
+
+.notion-video-embed__review-link svg {
+  width: 14px;
+  height: 14px;
+}
+
+.notion-video-embed__start-card {
+  width: 100%;
+  max-width: 24rem;
+  border: 1px solid var(--notion-border-strong);
+  border-radius: 8px;
+  background: rgb(32 32 32 / 96%);
+  padding: 12px;
+  color: var(--notion-text);
+  text-align: center;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  backdrop-filter: blur(12px);
+}
+
+.notion-video-embed__speed-badge {
+  border-color: var(--notion-border);
+  background: rgb(255 255 255 / 6%);
+  color: var(--notion-text);
+}
+
+.notion-video-embed__start-button {
+  border: 0;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 89%);
+  color: #191919;
+  box-shadow: none;
+}
+
+.notion-video-embed__start-button:hover {
+  background: white;
+  color: #191919;
+}
+
+.notion-video-embed__footer {
+  display: grid;
+  min-height: 34px;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--notion-border);
+  padding: 6px 10px;
+  color: var(--notion-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.notion-video-embed__client {
+  max-width: min(32vw, 14rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notion-video-embed__status {
+  min-width: 0;
+  text-align: right;
+}
+
+.notion-video-embed [role="status"] {
+  color: var(--notion-text-secondary);
+}
+
+.notion-video-embed [role="status"].text-emerald-300 {
+  color: #68a878;
+}
+
+@media (min-width: 40rem) {
+  .notion-video-embed__header {
+    padding-right: 10px;
+    padding-left: 12px;
+  }
+
+  .notion-video-embed__footer {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}
+
 .portal-page-header {
   display: flex;
   flex-direction: column;

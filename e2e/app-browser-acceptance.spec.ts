@@ -691,6 +691,67 @@ test("browser: Notion embed plays the shared video in place at the recommended s
     .toBe(360);
 });
 
+test("browser: Notion embed chrome matches the compact dark block around the player", async ({
+  page,
+}) => {
+  const reviewUrl = createVideoShareUrl(
+    shareProjectFixture,
+    shareProjectFixture.videos[0]!,
+    "http://local.test",
+  );
+  const embedUrl = createVideoEmbedUrl(reviewUrl);
+
+  expect(embedUrl).not.toBeNull();
+
+  await page.setViewportSize({ width: 960, height: 640 });
+  await page.goto(new URL(embedUrl!).pathname + new URL(embedUrl!).search);
+
+  const embed = page.getByTestId("notion-video-embed");
+  const surface = embed.locator(":scope > div").first();
+  const header = surface.locator("header");
+  const footer = surface.locator("footer");
+
+  await expect(embed).toBeVisible();
+
+  const presentation = await embed.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      fontFamily: style.fontFamily,
+    };
+  });
+  const surfacePresentation = await surface.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderRadius: style.borderRadius,
+      boxShadow: style.boxShadow,
+      width: element.getBoundingClientRect().width,
+    };
+  });
+  const headerHeight = await header.evaluate((element) => element.getBoundingClientRect().height);
+  const footerHeight = await footer.evaluate((element) => element.getBoundingClientRect().height);
+
+  expect(presentation).toEqual({
+    backgroundColor: "rgb(25, 25, 25)",
+    fontFamily: expect.stringContaining("Segoe UI"),
+  });
+  expect(surfacePresentation).toEqual({
+    backgroundColor: "rgb(32, 32, 32)",
+    borderRadius: "8px",
+    boxShadow: "none",
+    width: 960,
+  });
+  expect(headerHeight).toBeLessThanOrEqual(52);
+  expect(footerHeight).toBeLessThanOrEqual(44);
+
+  await page.setViewportSize({ width: 320, height: 640 });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(320);
+  await expect(surface).toHaveCSS("width", "320px");
+});
+
 test("browser: Notion embed records first playback once without adding an identity step", async ({
   page,
 }) => {
