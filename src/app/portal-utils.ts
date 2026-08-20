@@ -4,6 +4,29 @@ const gumletEmbedBaseUrl = "https://play.gumlet.io/embed";
 
 export const playbackSpeedOptions = [1, 1.25, 1.5, 1.75, 2] as const;
 
+export type LatestRequestTracker = {
+  begin: () => number;
+  cancel: () => void;
+  isLatest: (requestId: number) => boolean;
+};
+
+export function createLatestRequestTracker(): LatestRequestTracker {
+  let latestRequestId = 0;
+
+  return {
+    begin() {
+      latestRequestId += 1;
+      return latestRequestId;
+    },
+    cancel() {
+      latestRequestId += 1;
+    },
+    isLatest(requestId) {
+      return requestId === latestRequestId;
+    },
+  };
+}
+
 type PortalAppOriginOptions = {
   configuredUrl?: string;
   currentOrigin: string;
@@ -263,6 +286,23 @@ export function createVideoShareUrl(
   );
 
   return url.toString();
+}
+
+export function createVideoEmbedUrl(videoShareUrl: string): string | null {
+  try {
+    const url = new URL(videoShareUrl);
+    const routeMatch = url.pathname.match(/^\/video\/([^/]+)\/?$/);
+
+    if (!routeMatch) {
+      return null;
+    }
+
+    url.pathname = `/embed/video/${routeMatch[1]}`;
+
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 export function decodeShareProject(value: string): PortalProject | null {

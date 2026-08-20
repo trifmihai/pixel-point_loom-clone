@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 import type { PortalProject } from "../src/app/portal-types";
-import { createVideoShareUrl, encodeShareProject } from "../src/app/portal-utils";
+import {
+  createVideoEmbedUrl,
+  createVideoShareUrl,
+  encodeShareProject,
+} from "../src/app/portal-utils";
 
 const shareProjectFixture: PortalProject = {
   clientName: "Acme",
@@ -238,6 +242,154 @@ test("browser: public token share and video routes load without localStorage", a
   await expect(page.getByRole("button", { name: /Start 1\.5x review/ })).toBeVisible();
 });
 
+test("browser: first external playback records one view without adding a client step", async ({
+  page,
+}) => {
+  let viewCalls = 0;
+  let viewInput: Record<string, unknown> | null = null;
+
+  await page.route("**/api/public/share/view_token**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (url.pathname.endsWith("/view")) {
+      viewCalls += 1;
+      viewInput = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        body: JSON.stringify({ recorded: viewCalls === 1 }),
+        contentType: "application/json",
+        status: viewCalls === 1 ? 201 : 200,
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith("/comments")) {
+      await route.fulfill({
+        body: JSON.stringify({ comments: [] }),
+        contentType: "application/json",
+      });
+      return;
+    }
+
+    await route.fulfill({
+      body: JSON.stringify({
+        kind: "video",
+        snapshot: {
+          project: {
+            clientName: shareProjectFixture.clientName,
+            id: shareProjectFixture.id,
+            name: shareProjectFixture.name,
+            shareSlug: shareProjectFixture.shareSlug,
+          },
+          video: shareProjectFixture.videos[0],
+        },
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.goto("/");
+  await page.evaluate(() =>
+    window.localStorage.setItem(
+      "pixel-point.feedback.guest.v1",
+      JSON.stringify({ email: "mira@example.com", name: "Mira" }),
+    ),
+  );
+  await page.goto("/video/view_token");
+
+  await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
+  await expect(page.getByLabel("Name")).toBeHidden();
+  await expect(page.getByLabel("Email (optional)")).toBeHidden();
+
+  await page.locator("video").dispatchEvent("play");
+  await expect.poll(() => viewCalls).toBe(1);
+  expect(viewInput).toEqual({
+    videoId: "video_share_1",
+    viewerEmail: "mira@example.com",
+    viewerName: "Mira",
+  });
+
+  await page.locator("video").dispatchEvent("play");
+  await page.waitForTimeout(100);
+  expect(viewCalls).toBe(1);
+});
+
+test("browser: collection token records the selected video after Gumlet confirms playback", async ({
+  page,
+}) => {
+  const viewInputs: Array<Record<string, unknown>> = [];
+
+  await page.route("**/api/public/share/collection_view_token**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (url.pathname.endsWith("/view")) {
+      viewInputs.push(request.postDataJSON() as Record<string, unknown>);
+      await route.fulfill({
+        body: JSON.stringify({ recorded: true }),
+        contentType: "application/json",
+        status: 201,
+      });
+      return;
+    }
+
+    await route.fulfill({
+      body: JSON.stringify({ kind: "share", project: shareProjectFixture }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.goto("/share/collection_view_token");
+  await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
+
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: JSON.stringify({
+          context: "player.js",
+          event: "play",
+          value: null,
+          version: "3.0",
+        }),
+        origin: "https://play.gumlet.io",
+      }),
+    );
+  });
+
+  await expect.poll(() => viewInputs.length).toBe(1);
+  expect(viewInputs).toEqual([{ videoId: "video_share_1" }]);
+});
+
+test("browser: legacy encoded links keep playback without sending first-view requests", async ({
+  page,
+}) => {
+  let trackingCalls = 0;
+
+  await page.route("**/api/public/share/**/view", async (route) => {
+    trackingCalls += 1;
+    await route.fulfill({
+      body: JSON.stringify({ recorded: true }),
+      contentType: "application/json",
+      status: 201,
+    });
+  });
+
+  const videoShareUrl = createVideoShareUrl(
+    shareProjectFixture,
+    shareProjectFixture.videos[0]!,
+    "http://127.0.0.1:3002",
+  );
+  const videoUrl = new URL(videoShareUrl);
+
+  await page.goto(`${videoUrl.pathname}${videoUrl.search}`);
+  await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
+  await page.locator("video").dispatchEvent("play");
+  await page.waitForTimeout(100);
+
+  expect(trackingCalls).toBe(0);
+  await expect(page.getByRole("button", { name: /Start 1\.5x review/ })).toBeVisible();
+});
+
 test("browser: cloud video Review mode persists positioned feedback and guest identity on mobile", async ({
   page,
 }) => {
@@ -390,7 +542,9 @@ test("browser: direct comment link opens Review mode and focuses the matching fe
     .toBe(12.5);
 });
 
-test("browser: passcode-protected video token blocks details until unlock", async ({ page }) => {
+test("browser: passcode-protected review and embed routes block details until unlock", async ({
+  page,
+}) => {
   await page.route("**/api/public/share/protected_video/passcode", async (route) => {
     const requestBody = route.request().postDataJSON() as { passcode: string };
 
@@ -434,6 +588,267 @@ test("browser: passcode-protected video token blocks details until unlock", asyn
 
   await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Start 1\.5x review/ })).toBeVisible();
+
+  await page.goto("/embed/video/protected_video");
+  await expect(page.getByRole("heading", { name: "Protected video" })).toBeVisible();
+  await expect(page.getByTestId("notion-video-embed")).toHaveCount(0);
+
+  await page.getByLabel("Passcode").fill("client-pass");
+  await page.getByRole("button", { name: "Unlock review" }).click();
+
+  await expect(page.getByTestId("notion-video-embed")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open full review" })).toHaveAttribute(
+    "href",
+    "/video/protected_video",
+  );
+});
+
+test("browser: Notion embed rejects project collection tokens before and after passcode unlock", async ({
+  page,
+}) => {
+  await page.route("**/api/public/share/project_embed_token", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ kind: "share", project: shareProjectFixture }),
+      contentType: "application/json",
+    });
+  });
+  await page.route("**/api/public/share/protected_project_embed_token/passcode", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ kind: "share", project: shareProjectFixture }),
+      contentType: "application/json",
+    });
+  });
+  await page.route("**/api/public/share/protected_project_embed_token", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ kind: "share", requiresPasscode: true }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.goto("/embed/video/project_embed_token");
+  await expect(page.getByText("This video link is not available", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("notion-video-embed")).toHaveCount(0);
+
+  await page.goto("/embed/video/protected_project_embed_token");
+  await expect(page.getByRole("heading", { name: "Protected video" })).toBeVisible();
+  await page.getByLabel("Passcode").fill("client-pass");
+  await page.getByRole("button", { name: "Unlock review" }).click();
+
+  await expect(page.getByRole("heading", { name: "Protected video" })).toBeVisible();
+  await expect(page.getByText("This passcode did not unlock a video.")).toBeVisible();
+  await expect(page.getByTestId("notion-video-embed")).toHaveCount(0);
+});
+
+test("browser: Notion embed plays the shared video in place at the recommended speed", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = function mockPlay() {
+      return Promise.resolve();
+    };
+  });
+
+  const reviewUrl = createVideoShareUrl(
+    shareProjectFixture,
+    shareProjectFixture.videos[0]!,
+    "http://local.test",
+  );
+  const embedUrl = createVideoEmbedUrl(reviewUrl);
+
+  expect(embedUrl).not.toBeNull();
+
+  const embedPath = new URL(embedUrl!).pathname + new URL(embedUrl!).search;
+
+  await page.setViewportSize({ width: 360, height: 700 });
+  await page.goto(embedPath);
+
+  await expect(page.getByTestId("notion-video-embed")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
+  await expect(page.getByText("Client review", { exact: true })).toBeVisible();
+  await expect(page.getByText("Recommended 1.5x", { exact: true })).toBeVisible();
+  await expect(page.getByText("Watch in about 8:00", { exact: true })).toBeVisible();
+  await expect(page.getByText("Save about 4:00", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Playback speed")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Feedback" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Open full review" })).toHaveAttribute(
+    "href",
+    new URL(reviewUrl).pathname + new URL(reviewUrl).search,
+  );
+
+  await page.getByRole("button", { name: /Start 1\.5x review/ }).click();
+
+  await expect
+    .poll(() =>
+      page.locator("video").evaluate((element) => ({
+        currentTime: (element as HTMLVideoElement).currentTime,
+        playbackRate: (element as HTMLVideoElement).playbackRate,
+      })),
+    )
+    .toEqual({ currentTime: 15, playbackRate: 1.5 });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(360);
+});
+
+test("browser: Notion embed records first playback once without adding an identity step", async ({
+  page,
+}) => {
+  let viewCalls = 0;
+  let viewInput: Record<string, unknown> | null = null;
+
+  await page.route("**/api/public/share/embed_view_token**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (url.pathname.endsWith("/view")) {
+      viewCalls += 1;
+      viewInput = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        body: JSON.stringify({ recorded: viewCalls === 1 }),
+        contentType: "application/json",
+        status: viewCalls === 1 ? 201 : 200,
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith("/comments")) {
+      await route.fulfill({
+        body: JSON.stringify({ comments: [] }),
+        contentType: "application/json",
+      });
+      return;
+    }
+
+    await route.fulfill({
+      body: JSON.stringify({
+        kind: "video",
+        snapshot: {
+          project: {
+            clientName: shareProjectFixture.clientName,
+            id: shareProjectFixture.id,
+            name: shareProjectFixture.name,
+            shareSlug: shareProjectFixture.shareSlug,
+          },
+          video: shareProjectFixture.videos[0],
+        },
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.goto("/");
+  await page.evaluate(() =>
+    window.localStorage.setItem(
+      "pixel-point.feedback.guest.v1",
+      JSON.stringify({ email: "mira@example.com", name: "Mira" }),
+    ),
+  );
+  await page.goto("/embed/video/embed_view_token");
+
+  await expect(page.getByTestId("notion-video-embed")).toBeVisible();
+  await expect(page.getByLabel("Name")).toHaveCount(0);
+  await expect(page.getByLabel("Email (optional)")).toHaveCount(0);
+
+  await page.locator("video").dispatchEvent("play");
+  await expect.poll(() => viewCalls).toBe(1);
+  expect(viewInput).toEqual({
+    videoId: "video_share_1",
+    viewerEmail: "mira@example.com",
+    viewerName: "Mira",
+  });
+
+  await page.locator("video").dispatchEvent("play");
+  await page.waitForTimeout(100);
+  expect(viewCalls).toBe(1);
+});
+
+test("browser: Notion embed works inside a cross-origin parent frame", async ({ page }) => {
+  await page.goto("/");
+  const parentUrl = new URL(page.url());
+  const alternateHost = parentUrl.hostname === "127.0.0.1" ? "localhost" : "127.0.0.1";
+  const alternateOrigin = `${parentUrl.protocol}//${alternateHost}:${parentUrl.port}`;
+  const reviewUrl = createVideoShareUrl(
+    shareProjectFixture,
+    shareProjectFixture.videos[0]!,
+    alternateOrigin,
+  );
+  const embedUrl = createVideoEmbedUrl(reviewUrl);
+
+  expect(embedUrl).not.toBeNull();
+
+  await page.setContent(
+    `<iframe title="Notion-style embed" src="${embedUrl!.replaceAll("&", "&amp;")}" style="width:360px;height:640px;border:0"></iframe>`,
+  );
+
+  const embedFrame = page.frameLocator('iframe[title="Notion-style embed"]');
+  await expect(embedFrame.getByTestId("notion-video-embed")).toBeVisible();
+  await expect(embedFrame.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
+  await expect(embedFrame.getByRole("link", { name: "Open full review" })).toBeVisible();
+});
+
+test("browser: Gumlet Notion embed sends recommended-speed playback commands", async ({ page }) => {
+  await page.addInitScript(() => {
+    const commands: unknown[] = [];
+    const fakeContentWindow = {
+      postMessage(command: unknown) {
+        commands.push(command);
+      },
+    };
+
+    Object.defineProperty(window, "__gumletCommands", {
+      configurable: true,
+      value: commands,
+    });
+    Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
+      configurable: true,
+      get() {
+        return fakeContentWindow;
+      },
+    });
+  });
+
+  const gumletVideo = {
+    ...shareProjectFixture.videos[1]!,
+    recommendedPlaybackSpeed: 1.5 as const,
+  };
+  const reviewUrl = createVideoShareUrl(shareProjectFixture, gumletVideo, "http://local.test");
+  const embedUrl = createVideoEmbedUrl(reviewUrl);
+
+  expect(embedUrl).not.toBeNull();
+
+  await page.goto(new URL(embedUrl!).pathname + new URL(embedUrl!).search);
+  await expect(page.getByTestId("notion-video-embed")).toBeVisible();
+  await page.getByRole("button", { name: /Start 1\.5x review/ }).click();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const commands = (
+          window as typeof window & {
+            __gumletCommands?: unknown[];
+          }
+        ).__gumletCommands ?? [];
+        const normalizedCommands = commands.map((command) =>
+          typeof command === "string" ? JSON.parse(command) : command,
+        ) as Array<{ func?: string; method?: string; type?: string }>;
+
+        return {
+          play: normalizedCommands.some(
+            (command) =>
+              command.func === "play" || command.method === "play" || command.type === "play",
+          ),
+          speed: normalizedCommands.some(
+            (command) =>
+              (command.func === "setPlaybackRate" ||
+                command.method === "setPlaybackRate" ||
+                command.type === "setPlaybackRate") &&
+              JSON.stringify(command).includes("1.5"),
+          ),
+        };
+      }),
+    )
+    .toEqual({ play: true, speed: true });
 });
 
 test("browser: video page starts one shared video at selected speed from the overlay", async ({

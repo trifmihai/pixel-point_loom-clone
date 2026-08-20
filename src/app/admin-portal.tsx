@@ -2,6 +2,7 @@ import * as React from "react";
 import {
   ArrowDown,
   ArrowUp,
+  Bell,
   CheckCircle2,
   Cloud,
   CloudOff,
@@ -78,6 +79,7 @@ import {
 } from "@/toolcraft/ui/components/primitives";
 
 import { getAppConfig } from "./app-config";
+import { AdminActivityPanel } from "./admin-activity-panel";
 import { AdminFeedbackPanel } from "./admin-feedback-panel";
 import type { FeedbackVideoSummary } from "./feedback-types";
 import { GumletPlayer, type GumletPlayerHandle } from "./gumlet-player";
@@ -97,6 +99,8 @@ import {
 } from "./portal-store";
 import type { PlaybackSpeed, PortalData, PortalProject, PortalVideo } from "./portal-types";
 import {
+  createLatestRequestTracker,
+  createVideoEmbedUrl,
   createVideoShareUrl,
   createShareUrl,
   estimateTimeSavedSeconds,
@@ -305,6 +309,8 @@ export function AdminPortal(): React.JSX.Element {
   const [editDurationTouched, setEditDurationTouched] = React.useState(false);
   const [createProjectOpen, setCreateProjectOpen] = React.useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = React.useState(false);
+  const [activityOpen, setActivityOpen] = React.useState(false);
+  const [activityUnreadCount, setActivityUnreadCount] = React.useState(0);
   const [projectSettingsOpen, setProjectSettingsOpen] = React.useState(false);
   const [deleteProjectOpen, setDeleteProjectOpen] = React.useState(false);
   const [addVideoOpen, setAddVideoOpen] = React.useState(false);
@@ -316,10 +322,12 @@ export function AdminPortal(): React.JSX.Element {
     videoId: string;
   } | null>(null);
   const [shareUrl, setShareUrl] = React.useState("");
+  const [shareEmbedUrl, setShareEmbedUrl] = React.useState("");
   const [shareStatus, setShareStatus] = React.useState("");
   const [sharePasscode, setSharePasscode] = React.useState("");
   const [shareDialogTarget, setShareDialogTarget] = React.useState<ShareDialogTarget | null>(null);
   const [shareLoading, setShareLoading] = React.useState(false);
+  const shareRequestTracker = React.useMemo(() => createLatestRequestTracker(), []);
   const [cloudStatus, setCloudStatus] = React.useState<CloudSyncStatus>(
     config.cloudSyncEnabled ? "loading" : "local",
   );
@@ -544,13 +552,22 @@ export function AdminPortal(): React.JSX.Element {
     video?: PortalVideo,
     passcode = "",
   ): Promise<void> {
+    const requestId = shareRequestTracker.begin();
+
     setShareLoading(true);
+    setShareEmbedUrl("");
+    setShareUrl("");
     setShareStatus("Preparing link…");
 
     try {
       const url = await createReviewLink(project, video, passcode);
 
+      if (!shareRequestTracker.isLatest(requestId)) {
+        return;
+      }
+
       setShareUrl(url);
+      setShareEmbedUrl(video ? createVideoEmbedUrl(url) ?? "" : "");
       setShareStatus(
         passcode.trim()
           ? "Protected link ready"
@@ -559,14 +576,23 @@ export function AdminPortal(): React.JSX.Element {
             : "Client link ready",
       );
     } catch (error) {
+      if (!shareRequestTracker.isLatest(requestId)) {
+        return;
+      }
+
+      setShareEmbedUrl("");
+      setShareUrl("");
       setShareStatus(`Could not prepare link: ${getPortalApiErrorMessage(error)}`);
     } finally {
-      setShareLoading(false);
+      if (shareRequestTracker.isLatest(requestId)) {
+        setShareLoading(false);
+      }
     }
   }
 
   function openShareDialog(project: PortalProject, video?: PortalVideo): void {
     setSharePasscode("");
+    setShareEmbedUrl("");
     setShareUrl("");
     setShareDialogTarget({ projectId: project.id, videoId: video?.id });
     void resolveShareDialogLink(project, video);
@@ -578,6 +604,21 @@ export function AdminPortal(): React.JSX.Element {
     }
 
     await writeShareLinkToClipboard(shareUrl, "Link copied", "Link ready to copy");
+  }
+
+  async function handleCopyEmbedLink(): Promise<void> {
+    if (!shareEmbedUrl) {
+      return;
+    }
+
+    setShareStatus("Embed link ready to copy");
+
+    try {
+      await navigator.clipboard?.writeText(shareEmbedUrl);
+      setShareStatus("Embed link copied");
+    } catch {
+      setShareStatus("Embed link ready to copy");
+    }
   }
 
   function handleDeleteProject(): void {
@@ -818,6 +859,23 @@ export function AdminPortal(): React.JSX.Element {
                   {cloudMessage}
                 </p>
               </div>
+              <Button
+                aria-label={
+                  activityUnreadCount > 0
+                    ? `Activity, ${activityUnreadCount} unread`
+                    : "Activity"
+                }
+                className="w-full justify-between"
+                onClick={() => setActivityOpen(true)}
+                type="button"
+                variant="outline"
+              >
+                <span className="flex items-center gap-2">
+                  <Bell />
+                  Activity
+                </span>
+                {activityUnreadCount > 0 ? <Badge>{activityUnreadCount} unread</Badge> : null}
+              </Button>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -941,6 +999,19 @@ export function AdminPortal(): React.JSX.Element {
                 <div className="flex items-center justify-between gap-3">
                   <PortalBrand compact context="Client video portal" />
                   <div className="flex items-center gap-2">
+                    <Button
+                      aria-label={
+                        activityUnreadCount > 0
+                          ? `Activity, ${activityUnreadCount} unread`
+                          : "Activity"
+                      }
+                      onClick={() => setActivityOpen(true)}
+                      size="icon-lg"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Bell />
+                    </Button>
                     <Button
                       aria-label="Open projects"
                       onClick={() => setProjectPickerOpen(true)}
@@ -1345,11 +1416,26 @@ export function AdminPortal(): React.JSX.Element {
         </div>
       </div>
 
+      <AdminActivityPanel
+        onOpenChange={setActivityOpen}
+        onOpenVideo={(projectId, videoId) => {
+          setSelectedProjectId(projectId);
+          setActiveVideoId(videoId);
+          setShareStatus("");
+        }}
+        onUnreadCountChange={setActivityUnreadCount}
+        open={activityOpen}
+      />
+
       <Dialog
         onOpenChange={(open) => {
           if (!open) {
+            shareRequestTracker.cancel();
             setShareDialogTarget(null);
             setSharePasscode("");
+            setShareEmbedUrl("");
+            setShareLoading(false);
+            setShareUrl("");
           }
         }}
         open={shareDialogProject !== null}
@@ -1399,6 +1485,62 @@ export function AdminPortal(): React.JSX.Element {
                 Open link
               </Button>
             </div>
+            {shareDialogVideo ? (
+              <>
+                <Separator />
+                <section className="space-y-3" aria-labelledby="share-dialog-embed-title">
+                  <div>
+                    <h3
+                      className="text-sm font-semibold text-white"
+                      id="share-dialog-embed-title"
+                    >
+                      Notion embed
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-[color:var(--muted-foreground)]">
+                      In Notion, type /embed, paste this HTTPS URL, and choose Embed.
+                    </p>
+                  </div>
+                  <Field>
+                    <FieldLabel htmlFor="share-dialog-embed-url">Notion embed URL</FieldLabel>
+                    <Input
+                      aria-label="Notion embed URL"
+                      className="portal-numeric"
+                      id="share-dialog-embed-url"
+                      name="share-embed-url"
+                      readOnly
+                      size="lg"
+                      value={shareEmbedUrl}
+                    />
+                  </Field>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button
+                      disabled={!shareEmbedUrl || shareLoading}
+                      onClick={() => void handleCopyEmbedLink()}
+                      size="lg"
+                      type="button"
+                    >
+                      <Copy />
+                      Copy embed link
+                    </Button>
+                    <Button
+                      disabled={!shareEmbedUrl || shareLoading}
+                      onClick={() => window.open(shareEmbedUrl, "_blank", "noreferrer")}
+                      size="lg"
+                      type="button"
+                      variant="outline"
+                    >
+                      <ExternalLink />
+                      Preview embed
+                    </Button>
+                  </div>
+                  {isLocalShareOrigin ? (
+                    <p className="text-xs leading-5 text-[color:var(--muted-foreground)]">
+                      Local preview only. Notion needs the deployed public HTTPS URL.
+                    </p>
+                  ) : null}
+                </section>
+              </>
+            ) : null}
             <PortalStatus
               message={shareStatus}
               tone={shareStatus.startsWith("Could not") ? "error" : "success"}

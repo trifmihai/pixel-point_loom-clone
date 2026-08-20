@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -39,7 +39,7 @@ describe("Cloudflare Pages static deployment config", () => {
     );
   });
 
-  it("keeps direct SPA refreshes on share and video routes working", () => {
+  it("keeps direct SPA refreshes on share, review, and embed routes working", () => {
     const redirects = readFileSync("public/_redirects", "utf8");
     const redirectLines = redirects
       .split(/\r?\n/)
@@ -50,6 +50,7 @@ describe("Cloudflare Pages static deployment config", () => {
     expect(redirects).toContain("/admin/* /index.html 200");
     expect(redirects).toContain("/share/* /index.html 200");
     expect(redirects).toContain("/video/* /index.html 200");
+    expect(redirects).toContain("/embed/video/* /index.html 200");
     expect(redirectLines).not.toContain("/* /index.html 200");
   });
 
@@ -65,6 +66,26 @@ describe("Cloudflare Pages static deployment config", () => {
     expect(headers).toContain("frame-src https://play.gumlet.io");
     expect(headers).toContain("media-src 'self' blob: https://video.gumlet.io https://*.gumlet.io");
     expect(headers).not.toMatch(/worker|function|kv|r2|d1|durable|stream|images/i);
+  });
+
+  it("permits third-party framing only for the dedicated video embed route", () => {
+    const headers = readFileSync("public/_headers", "utf8");
+    const headerBlocks = headers
+      .split(/(?=^\/)/m)
+      .map((block) => block.trim())
+      .filter(Boolean);
+    const getHeaderBlock = (route: string) =>
+      headerBlocks.find((block) => block.split(/\r?\n/, 1)[0] === route) ?? "";
+
+    expect(getHeaderBlock("/*")).toContain("Content-Security-Policy:");
+    expect(getHeaderBlock("/*")).not.toContain("frame-ancestors");
+    for (const protectedRoute of ["/", "/admin", "/admin/*", "/share/*", "/video/*"]) {
+      expect(getHeaderBlock(protectedRoute)).toContain(
+        "Content-Security-Policy: frame-ancestors 'self'",
+      );
+    }
+    expect(getHeaderBlock("/embed/video/*")).toContain("X-Robots-Tag: noindex, nofollow");
+    expect(getHeaderBlock("/embed/video/*")).not.toContain("frame-ancestors");
   });
 
   it("keeps frontend config and API client free of private secrets and paid clients", () => {
@@ -113,6 +134,34 @@ describe("Cloudflare Pages static deployment config", () => {
       "admin_read_at",
     ]) {
       expect(migration).toMatch(new RegExp(`CREATE INDEX[^;]+${indexTarget}`, "i"));
+    }
+  });
+
+  it("adds first-video-view storage without altering existing portal tables", () => {
+    const migrationPath = "migrations/0003_first_video_views.sql";
+
+    expect(existsSync(migrationPath)).toBe(true);
+
+    if (!existsSync(migrationPath)) {
+      return;
+    }
+
+    const migration = readFileSync(migrationPath, "utf8");
+
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS first_video_views");
+    expect(migration).toContain("video_id TEXT NOT NULL UNIQUE");
+    expect(migration).toContain("FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE");
+    expect(migration).toContain("FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE");
+    expect(migration).not.toMatch(/ALTER\s+TABLE/i);
+    for (const column of [
+      "share_token",
+      "viewer_name",
+      "viewer_email",
+      "first_viewed_at",
+      "admin_read_at",
+      "email_status",
+    ]) {
+      expect(migration).toContain(column);
     }
   });
 

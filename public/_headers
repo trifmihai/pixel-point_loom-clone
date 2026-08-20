@@ -2,4 +2,22 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://video.gumlet.io https://*.gumlet.io; media-src 'self' blob: https://video.gumlet.io https://*.gumlet.io; frame-src https://play.gumlet.io; connect-src 'self' https://play.gumlet.io https://video.gumlet.io https://*.gumlet.io; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://video.gumlet.io https://*.gumlet.io; media-src 'self' blob: https://video.gumlet.io https://*.gumlet.io; frame-src https://play.gumlet.io; connect-src 'self' https://play.gumlet.io https://video.gumlet.io https://*.gumlet.io; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'
+
+/
+  Content-Security-Policy: frame-ancestors 'self'
+
+/admin
+  Content-Security-Policy: frame-ancestors 'self'
+
+/admin/*
+  Content-Security-Policy: frame-ancestors 'self'
+
+/share/*
+  Content-Security-Policy: frame-ancestors 'self'
+
+/video/*
+  Content-Security-Policy: frame-ancestors 'self'
+
+/embed/video/*
+  X-Robots-Tag: noindex, nofollow

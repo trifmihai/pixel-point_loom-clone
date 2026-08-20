@@ -22,6 +22,7 @@ import {
 } from "@/toolcraft/ui";
 
 import { GumletPlayer } from "./gumlet-player";
+import { useFirstViewTracking } from "./first-view-tracking";
 import { getPortalApiErrorMessage, portalApi, type PublicShareResponse } from "./portal-api";
 import { loadPortalData } from "./portal-store";
 import type {
@@ -200,6 +201,8 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
   >(() => (project || encodedData ? "idle" : "loading"));
   const [tokenError, setTokenError] = React.useState("");
   const [passcodeDraft, setPasscodeDraft] = React.useState("");
+  const [trackingPasscode, setTrackingPasscode] = React.useState<string | undefined>();
+  const [cloudTokenResolved, setCloudTokenResolved] = React.useState(false);
   const [passcodeLoading, setPasscodeLoading] = React.useState(false);
   const videos = project ? getSortedVideos(project) : [];
   const [selectedVideoId, setSelectedVideoId] = React.useState(() => videos[0]?.id ?? "");
@@ -213,6 +216,12 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
   const [seekSeconds, setSeekSeconds] = React.useState<number | undefined>();
 
   const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? videos[0] ?? null;
+  const recordFirstView = useFirstViewTracking({
+    enabled: cloudTokenResolved,
+    passcode: trackingPasscode,
+    token: slug,
+    videoId: selectedVideo?.id,
+  });
   const selectedComments = comments.filter((comment) => comment.videoId === selectedVideo?.id);
   const [viewerSpeed, setViewerSpeed] = React.useState<PlaybackSpeed>(
     () => selectedVideo?.recommendedPlaybackSpeed ?? 1.5,
@@ -229,6 +238,7 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
 
     if (legacyProject) {
       setProject(legacyProject);
+      setCloudTokenResolved(false);
       setTokenStatus("idle");
       setTokenError("");
       return undefined;
@@ -264,6 +274,7 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
         }
 
         setProject(nextProject);
+        setCloudTokenResolved(true);
         setTokenStatus("idle");
       })
       .catch((error: unknown) => {
@@ -376,6 +387,8 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
       }
 
       setProject(nextProject);
+      setCloudTokenResolved(true);
+      setTrackingPasscode(passcodeDraft);
       setTokenStatus("idle");
       setPasscodeDraft("");
     } catch (error) {
@@ -495,7 +508,15 @@ export function SharePortal({ encodedData, slug }: SharePortalProps): React.JSX.
             {selectedVideo && playbackVideo ? (
               <>
                 <div data-testid="collection-player" id="collection-player">
-                  <GumletPlayer seekSeconds={seekSeconds} video={playbackVideo} />
+                  <GumletPlayer
+                    onPlaybackEvent={(message) => {
+                      if (message.playbackStarted) {
+                        recordFirstView();
+                      }
+                    }}
+                    seekSeconds={seekSeconds}
+                    video={playbackVideo}
+                  />
                 </div>
                 <Card>
                   <CardHeader className="gap-4 md:grid-cols-[minmax(0,1fr)_auto]">

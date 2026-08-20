@@ -7,6 +7,7 @@ import type {
   PublicFeedbackComment,
   UpdateFeedbackInput,
 } from "./feedback-types";
+import type { FirstViewActivityResponse } from "./first-view-types";
 
 export type PortalApiState<T> = {
   data: T | null;
@@ -45,6 +46,12 @@ export type PublicShareResponse =
 export type AdminSessionResponse = {
   adminEmail: string;
   authenticated: boolean;
+};
+
+export type RecordFirstVideoViewInput = {
+  videoId: string;
+  viewerEmail?: string;
+  viewerName?: string;
 };
 
 type PortalApiErrorBody = {
@@ -162,6 +169,10 @@ export const portalApi = {
     return requestJson<FeedbackSummaryResponse>("/api/admin/feedback");
   },
 
+  getAdminActivity(): Promise<FirstViewActivityResponse> {
+    return requestJson<FirstViewActivityResponse>("/api/admin/activity");
+  },
+
   getAdminSession(): Promise<AdminSessionResponse> {
     return requestJson<AdminSessionResponse>("/api/auth/session");
   },
@@ -213,6 +224,27 @@ export const portalApi = {
     return requestJson<{ read: true }>(
       `/api/admin/videos/${encodeURIComponent(videoId)}/feedback/read`,
       { method: "POST" },
+    );
+  },
+
+  markActivityRead(): Promise<{ read: true }> {
+    return requestJson<{ read: true }>("/api/admin/activity/read", {
+      method: "POST",
+    });
+  },
+
+  recordFirstVideoView(
+    token: string,
+    input: RecordFirstVideoViewInput,
+    passcode?: string,
+  ): Promise<{ recorded: boolean }> {
+    return requestJson<{ recorded: boolean }>(
+      `/api/public/share/${encodeURIComponent(token)}/view`,
+      {
+        body: JSON.stringify(input),
+        headers: passcode ? { "X-Share-Passcode": passcode } : undefined,
+        method: "POST",
+      },
     );
   },
 

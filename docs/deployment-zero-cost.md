@@ -40,7 +40,9 @@ share tokens, and passcode hashes. Videos remain hosted on Gumlet.
 1. Create a D1 database in Cloudflare.
 2. Replace `database_id` in `wrangler.toml`.
 3. Apply `migrations/0001_portal.sql`.
-4. Bind the database to Pages as `DB`.
+4. Apply `migrations/0002_feedback_comments.sql`.
+5. Apply `migrations/0003_first_video_views.sql`.
+6. Bind the database to Pages as `DB`.
 
 Schema summary:
 
@@ -52,6 +54,11 @@ Schema summary:
   `created_at`, `updated_at`.
 - `share_links`: `id`, `token`, `project_id`, nullable `video_id`, nullable
   `passcode_hash`, nullable `expires_at`, `created_at`, nullable `revoked_at`.
+- `feedback_comments`: token-scoped timestamped client feedback, replies,
+  moderation state, read state, and soft-delete metadata.
+- `first_video_views`: one immutable first-view event per video, optional
+  remembered viewer identity, admin read state, and optional email-delivery
+  status.
 
 `share_slug` is an app compatibility column for existing local projects and
 legacy fallback links.
@@ -93,6 +100,26 @@ Manual Cloudflare Pages secrets:
 
 Do not add Gumlet API keys to frontend code. This app only uses public Gumlet
 asset/embed/video URLs already provided by the admin.
+
+## First-view activity and optional email
+
+- A confirmed external playback on a cloud token link inserts at most one
+  `first_video_views` row per video. Repeated plays and additional share links
+  for the same video do not create duplicate notifications.
+- A valid signed admin session is excluded, so previewing a client link while
+  signed in does not count as an external first view.
+- Existing guest name/email from the feedback flow is reused when available.
+  Viewers are never asked for another step; otherwise the event is anonymous.
+- The admin Activity panel is the zero-setup notification path. It remains the
+  source of truth even when optional email delivery is unavailable or fails.
+- The Pages runtime exposes an optional first-view email-delivery adapter, but
+  this repository intentionally does not configure an email provider, sender
+  domain, API key, or Worker binding. Until an adapter is connected, the admin
+  panel shows that email is not configured.
+- Apply `migrations/0003_first_video_views.sql` before relying on Activity in
+  production. If it is not applied yet, old client links and playback continue
+  to work because the tracking request is non-blocking and isolated from video
+  loading/playback.
 
 ## Cost Guardrails
 

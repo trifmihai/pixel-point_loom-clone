@@ -5,6 +5,8 @@ import {
   buildGumletEmbedUrl,
   calculatePlaybackSavings,
   createShareUrl,
+  createLatestRequestTracker,
+  createVideoEmbedUrl,
   createVideoShareUrl,
   createShareSlug,
   decodeShareVideoSnapshot,
@@ -142,6 +144,39 @@ describe("portal utilities", () => {
       },
       video: projectFixture.videos[0],
     });
+  });
+
+  it("derives one embed destination from the existing video review token", () => {
+    expect(
+      createVideoEmbedUrl("https://pixel-point-loom-clone.pages.dev/video/token_123"),
+    ).toBe("https://pixel-point-loom-clone.pages.dev/embed/video/token_123");
+    expect(
+      createVideoEmbedUrl(
+        "https://pixel-point-loom-clone.pages.dev/video/hero-review-abcd1234?data=encoded_snapshot",
+      ),
+    ).toBe(
+      "https://pixel-point-loom-clone.pages.dev/embed/video/hero-review-abcd1234?data=encoded_snapshot",
+    );
+  });
+
+  it("rejects project and malformed URLs as video embed destinations", () => {
+    expect(
+      createVideoEmbedUrl("https://pixel-point-loom-clone.pages.dev/share/token_123"),
+    ).toBeNull();
+    expect(createVideoEmbedUrl("not a URL")).toBeNull();
+  });
+
+  it("invalidates stale share-link requests and explicit cancellations", () => {
+    const tracker = createLatestRequestTracker();
+    const initialRequest = tracker.begin();
+    const protectedRequest = tracker.begin();
+
+    expect(tracker.isLatest(initialRequest)).toBe(false);
+    expect(tracker.isLatest(protectedRequest)).toBe(true);
+
+    tracker.cancel();
+
+    expect(tracker.isLatest(protectedRequest)).toBe(false);
   });
 
   it("normalizes and resolves the configured public app URL", () => {

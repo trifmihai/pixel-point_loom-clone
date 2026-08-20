@@ -480,6 +480,385 @@ describe("portal cloud API", () => {
     );
   });
 
+  it("records the first confirmed external playback and exposes it to the admin activity feed", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const recorded = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/view", {
+        body: JSON.stringify({ videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const activity = await handlePortalApiRequest(
+      createAdminRequest("/api/admin/activity", sessionCookie),
+      runtime,
+    );
+
+    expect(recorded.status).toBe(201);
+    await expect(json(recorded)).resolves.toEqual({ recorded: true });
+    expect(activity.status).toBe(200);
+    await expect(json(activity)).resolves.toEqual({
+      emailConfigured: false,
+      events: [
+        {
+          emailStatus: "not-configured",
+          firstViewedAt: "2026-07-09T09:00:00.000Z",
+          id: expect.any(String),
+          projectId: "project_1",
+          projectName: "Project Collection",
+          shareToken: "token_1",
+          videoId: "video_1",
+          videoTitle: "Successful Story",
+        },
+      ],
+      unreadCount: 1,
+    });
+  });
+
+  it("records only one first view per video across links and keeps already-known viewer identity", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const first = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/view", {
+        body: JSON.stringify({
+          videoId: "video_1",
+          viewerEmail: " mira@example.com ",
+          viewerName: " Mira ",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const duplicate = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_2/view", {
+        body: JSON.stringify({ videoId: "video_1", viewerName: "Other viewer" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const activity = await json<{
+      events: Array<{ viewerEmail?: string; viewerName?: string }>;
+      unreadCount: number;
+    }>(
+      await handlePortalApiRequest(
+        createAdminRequest("/api/admin/activity", sessionCookie),
+        runtime,
+      ),
+    );
+
+    expect(first.status).toBe(201);
+    expect(duplicate.status).toBe(200);
+    await expect(json(duplicate)).resolves.toEqual({ recorded: false });
+    expect(activity.events).toEqual([
+      expect.objectContaining({
+        viewerEmail: "mira@example.com",
+        viewerName: "Mira",
+      }),
+    ]);
+    expect(activity.unreadCount).toBe(1);
+  });
+
+  it("keeps playback tracking non-fatal when the additive activity migration is not ready", async () => {
+    const db = new MemoryPortalCloudDatabase();
+    const runtime = createRuntime(db);
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    db.createFirstVideoView = async () => {
+      throw new Error("no such table: first_video_views");
+    };
+
+    const response = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/view", {
+        body: JSON.stringify({ videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    expect(response.status).toBe(503);
+    await expect(json(response)).resolves.toEqual({
+      error: {
+        code: "activity_migration_required",
+        message: "Activity storage is not ready. Apply the latest D1 migrations and try again.",
+      },
+    });
+  });
+
+  it("does not record playback from a browser carrying the valid admin session", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const ownerView = await handlePortalApiRequest(
+      createAdminRequest("/api/public/share/token_1/view", sessionCookie, {
+        body: JSON.stringify({ videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const activity = await json<{ events: unknown[]; unreadCount: number }>(
+      await handlePortalApiRequest(
+        createAdminRequest("/api/admin/activity", sessionCookie),
+        runtime,
+      ),
+    );
+
+    expect(ownerView.status).toBe(200);
+    await expect(json(ownerView)).resolves.toEqual({ recorded: false });
+    expect(activity).toMatchObject({ events: [], unreadCount: 0 });
+  });
+
+  it("requires the existing share passcode before recording a protected video view", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({
+          passcode: "client-pass",
+          projectId: "project_1",
+          videoId: "video_1",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const blocked = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/view", {
+        body: JSON.stringify({ videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const recorded = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/view", {
+        body: JSON.stringify({ videoId: "video_1" }),
+        headers: { "X-Share-Passcode": "client-pass" },
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    expect(blocked.status).toBe(403);
+    expect(recorded.status).toBe(201);
+  });
+
+  it("marks loaded activity read without changing the first-view evidence", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/view", {
+        body: JSON.stringify({ videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const marked = await handlePortalApiRequest(
+      createAdminRequest("/api/admin/activity/read", sessionCookie, { method: "POST" }),
+      runtime,
+    );
+    const activity = await json<{
+      events: Array<{ adminReadAt?: string; firstViewedAt: string }>;
+      unreadCount: number;
+    }>(
+      await handlePortalApiRequest(
+        createAdminRequest("/api/admin/activity", sessionCookie),
+        runtime,
+      ),
+    );
+
+    expect(marked.status).toBe(200);
+    expect(activity.unreadCount).toBe(0);
+    expect(activity.events).toEqual([
+      expect.objectContaining({
+        adminReadAt: "2026-07-09T09:00:00.000Z",
+        firstViewedAt: "2026-07-09T09:00:00.000Z",
+      }),
+    ]);
+  });
+
+  it("updates optional email delivery state without rolling back in-app activity", async () => {
+    const runtime = createRuntime();
+    const deferred: Array<Promise<unknown>> = [];
+    const delivered: string[] = [];
+    runtime.defer = (promise) => deferred.push(promise);
+    runtime.deliverFirstViewNotification = async (activity) => {
+      delivered.push(activity.videoId);
+    };
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const recorded = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/view", {
+        body: JSON.stringify({ videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    await Promise.all(deferred);
+    const activity = await json<{
+      emailConfigured: boolean;
+      events: Array<{ emailStatus: string }>;
+    }>(
+      await handlePortalApiRequest(
+        createAdminRequest("/api/admin/activity", sessionCookie),
+        runtime,
+      ),
+    );
+
+    expect(recorded.status).toBe(201);
+    expect(delivered).toEqual(["video_1"]);
+    expect(activity.emailConfigured).toBe(true);
+    expect(activity.events[0]?.emailStatus).toBe("sent");
+  });
+
+  it("keeps in-app activity when optional email delivery fails", async () => {
+    const runtime = createRuntime();
+    const deferred: Array<Promise<unknown>> = [];
+    runtime.defer = (promise) => deferred.push(promise);
+    runtime.deliverFirstViewNotification = async () => {
+      throw new Error("Email provider unavailable");
+    };
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+
+    const recorded = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/view", {
+        body: JSON.stringify({ videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    await Promise.all(deferred);
+    const activity = await json<{
+      events: Array<{ emailStatus: string; videoId: string }>;
+      unreadCount: number;
+    }>(
+      await handlePortalApiRequest(
+        createAdminRequest("/api/admin/activity", sessionCookie),
+        runtime,
+      ),
+    );
+
+    expect(recorded.status).toBe(201);
+    expect(activity.unreadCount).toBe(1);
+    expect(activity.events).toEqual([
+      expect.objectContaining({ emailStatus: "failed", videoId: "video_1" }),
+    ]);
+  });
+
   it("creates and lists token-scoped public feedback without exposing private fields", async () => {
     const runtime = createRuntime();
     const sessionCookie = await createAdminSessionCookie(runtime);

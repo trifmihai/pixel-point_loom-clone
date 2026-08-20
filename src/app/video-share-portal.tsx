@@ -1,9 +1,10 @@
 import * as React from "react";
-import { Clock3, Gauge, Play } from "lucide-react";
+import { Clock3, ExternalLink, Gauge, Play } from "lucide-react";
 
 import {
   Badge,
   Button,
+  buttonVariants,
   Card,
   CardContent,
   CardDescription,
@@ -38,10 +39,12 @@ import {
   formatSavedTime,
 } from "./portal-utils";
 import type { GumletPlayerMessage } from "./gumlet-player-adapter";
+import { useFirstViewTracking } from "./first-view-tracking";
 
 type VideoSharePortalProps = {
   directCommentId?: string;
   encodedData?: string;
+  presentation?: "embed" | "review";
   slug: string;
 };
 
@@ -105,7 +108,10 @@ function getVideoShareProject(project: PortalProject): VideoShareSnapshot["proje
   };
 }
 
-function getSnapshotFromPublicResponse(response: PublicShareResponse): VideoShareSnapshot | null {
+function getSnapshotFromPublicResponse(
+  response: PublicShareResponse,
+  options: { allowProjectFallback: boolean },
+): VideoShareSnapshot | null {
   if ("requiresPasscode" in response && response.requiresPasscode) {
     return null;
   }
@@ -114,7 +120,7 @@ function getSnapshotFromPublicResponse(response: PublicShareResponse): VideoShar
     return response.snapshot;
   }
 
-  if (response.kind === "share" && "project" in response) {
+  if (options.allowProjectFallback && response.kind === "share" && "project" in response) {
     const video = [...response.project.videos].sort(
       (left, right) => left.orderIndex - right.orderIndex,
     )[0];
@@ -179,6 +185,7 @@ function getGumletPlaybackFallbackMessage(playbackSpeed: number): string {
 export function VideoSharePortal({
   directCommentId,
   encodedData,
+  presentation = "review",
   slug,
 }: VideoSharePortalProps): React.JSX.Element {
   const [snapshot, setSnapshot] = React.useState<VideoShareSnapshot | null>(() =>
@@ -215,6 +222,13 @@ export function VideoSharePortal({
   const nativeVideoRef = React.useRef<HTMLVideoElement | null>(null);
   const video = snapshot?.video ?? null;
   const project = snapshot?.project ?? null;
+  const isEmbed = presentation === "embed";
+  const recordFirstView = useFirstViewTracking({
+    enabled: cloudTokenResolved,
+    passcode: feedbackPasscode,
+    token: slug,
+    videoId: video?.id,
+  });
   const playbackVideo = video
     ? {
         ...video,
@@ -266,7 +280,9 @@ export function VideoSharePortal({
           return;
         }
 
-        const nextSnapshot = getSnapshotFromPublicResponse(response);
+        const nextSnapshot = getSnapshotFromPublicResponse(response, {
+          allowProjectFallback: !isEmbed,
+        });
 
         if (!nextSnapshot) {
           setTokenStatus("error");
@@ -290,7 +306,7 @@ export function VideoSharePortal({
     return () => {
       cancelled = true;
     };
-  }, [encodedData, slug]);
+  }, [encodedData, isEmbed, slug]);
 
   const clearGumletFallbackTimer = React.useCallback(() => {
     if (gumletFallbackTimeoutRef.current !== null) {
@@ -453,6 +469,10 @@ export function VideoSharePortal({
       return;
     }
 
+    if (message.playbackStarted) {
+      recordFirstView();
+    }
+
     const wasActiveAttempt = gumletAttemptRef.current.active;
     const nextAttempt = {
       ...gumletAttemptRef.current,
@@ -561,7 +581,9 @@ export function VideoSharePortal({
 
     try {
       const response = await portalApi.unlockPublicShare(slug, passcodeDraft);
-      const nextSnapshot = getSnapshotFromPublicResponse(response);
+      const nextSnapshot = getSnapshotFromPublicResponse(response, {
+        allowProjectFallback: !isEmbed,
+      });
 
       if (!nextSnapshot) {
         setTokenStatus("passcode");
@@ -618,6 +640,120 @@ export function VideoSharePortal({
           title="This video link is not available"
           tone="error"
         />
+      </main>
+    );
+  }
+
+  const videoPlayer = video.directVideoUrl ? (
+    <video
+      ref={nativeVideoRef}
+      className="aspect-video w-full bg-black"
+      controls
+      onLoadedMetadata={handleNativeMetadata}
+      onPlay={() => {
+        applyNativePlaybackSettings({ audible: true });
+        recordFirstView();
+      }}
+      onTimeUpdate={(event) => setReviewTimestampSeconds(event.currentTarget.currentTime)}
+      poster={video.thumbnailUrl}
+      playsInline
+      preload="metadata"
+      src={video.directVideoUrl}
+      title={`${video.title} video`}
+    />
+  ) : playbackVideo ? (
+    <GumletPlayer
+      ref={gumletPlayerRef}
+      onCurrentTime={setReviewTimestampSeconds}
+      onDuration={handleResolvedDuration}
+      onPlaybackEvent={handleGumletPlaybackEvent}
+      video={playbackVideo}
+    />
+  ) : null;
+
+  if (isEmbed) {
+    const reviewSearch = encodedData
+      ? `?${new URLSearchParams({ data: encodedData }).toString()}`
+      : "";
+    const reviewPath = `/video/${encodeURIComponent(slug)}${reviewSearch}`;
+
+    return (
+      <main
+        className="flex min-h-dvh items-center bg-[color:var(--portal-bg)] p-2 text-white sm:p-3"
+        data-testid="notion-video-embed"
+      >
+        <div className="mx-auto w-full max-w-5xl overflow-hidden rounded-xl border border-[color:var(--portal-border-strong)] bg-[color:var(--portal-surface-1)] shadow-2xl shadow-black/30">
+          <header className="flex min-w-0 items-start justify-between gap-3 border-b border-[color:var(--portal-border)] px-3 py-2.5 sm:px-4 sm:py-3">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium text-[color:var(--muted-foreground)]">
+                {project.name}
+              </p>
+              <h1 className="truncate text-sm font-semibold text-white sm:text-base">
+                {video.title}
+              </h1>
+            </div>
+            <a
+              className={buttonVariants({ size: "sm", variant: "ghost" })}
+              href={reviewPath}
+              target="_blank"
+            >
+              <ExternalLink aria-hidden="true" />
+              <span className="hidden sm:inline">Open full review</span>
+              <span className="sr-only sm:hidden">Open full review</span>
+            </a>
+          </header>
+
+          <div className="relative bg-black">
+            <section
+              className="min-w-0 overflow-hidden bg-black"
+              data-testid="video-player-frame"
+            >
+              {videoPlayer}
+            </section>
+
+            {!started ? (
+              <div
+                className="absolute inset-0 flex items-center justify-center bg-black/55 p-3"
+                data-testid="review-start-panel"
+              >
+                <div className="w-full max-w-sm rounded-xl border border-blue-300/30 bg-[color:color-mix(in_oklab,var(--portal-surface-1)_90%,transparent)] p-3 text-center shadow-2xl backdrop-blur-md sm:p-4">
+                  <div className="flex flex-col items-center gap-2.5">
+                    <Badge className="gap-2" variant="secondary">
+                      <Gauge aria-hidden="true" className="size-4" />
+                      Recommended {viewerSpeed}x
+                    </Badge>
+                    <div className="space-y-1 text-xs text-[color:var(--muted-foreground)] sm:text-sm">
+                      {watchTimeLabel ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <Clock3 aria-hidden="true" className="size-4" />
+                          {watchTimeLabel}
+                        </span>
+                      ) : null}
+                      {savedTimeLabel ? <span className="block">{savedTimeLabel}</span> : null}
+                      {!playbackSavings && durationDetectionTimedOut ? (
+                        <span className="block">{durationFallbackMessage}</span>
+                      ) : null}
+                    </div>
+                    <Button className="min-h-10 w-full" onClick={handleStart} size="lg" type="button">
+                      <Play />
+                      <span>
+                        {gumletStartPending ? "Starting" : "Start"} {viewerSpeed}x review
+                      </span>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <footer className="flex min-h-9 items-center justify-between gap-3 px-3 py-2 text-xs text-[color:var(--muted-foreground)] sm:px-4">
+            <span>{project.clientName || "Client review"}</span>
+            <PortalStatus
+              message={gumletPlaybackStatus}
+              tone={gumletPlaybackStatus.startsWith("Playback confirmed") ? "success" : "default"}
+            />
+          </footer>
+        </div>
       </main>
     );
   }
@@ -685,29 +821,7 @@ export function VideoSharePortal({
             className="min-w-0 overflow-hidden rounded-xl border border-[color:var(--portal-border-strong)] bg-black shadow-2xl shadow-black/30"
             data-testid="video-player-frame"
           >
-            {video.directVideoUrl ? (
-              <video
-                ref={nativeVideoRef}
-                className="aspect-video w-full bg-black"
-                controls
-                onLoadedMetadata={handleNativeMetadata}
-                onPlay={() => applyNativePlaybackSettings({ audible: true })}
-                onTimeUpdate={(event) => setReviewTimestampSeconds(event.currentTarget.currentTime)}
-                poster={video.thumbnailUrl}
-                playsInline
-                preload="metadata"
-                src={video.directVideoUrl}
-                title={`${video.title} video`}
-              />
-            ) : playbackVideo ? (
-              <GumletPlayer
-                ref={gumletPlayerRef}
-                onCurrentTime={setReviewTimestampSeconds}
-                onDuration={handleResolvedDuration}
-                onPlaybackEvent={handleGumletPlaybackEvent}
-                video={playbackVideo}
-              />
-            ) : null}
+            {videoPlayer}
           </section>
 
           {!started ? (

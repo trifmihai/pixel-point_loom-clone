@@ -13,6 +13,8 @@ describe("portal acceptance metadata", () => {
     expect(appProductReadiness.requestedBehavior).toContain("Gumlet asset IDs");
     expect(appProductReadiness.requestedBehavior).toContain("stable project and video share links");
     expect(appProductReadiness.requestedBehavior).toContain("D1-persisted timestamped visual feedback");
+    expect(appProductReadiness.requestedBehavior).toContain("first external playback");
+    expect(appProductReadiness.requestedBehavior).toContain("Notion");
     expect(appAcceptance).toEqual(
       expect.arrayContaining([
         "admin creates projects",
@@ -23,6 +25,12 @@ describe("portal acceptance metadata", () => {
         "direct comment links open Review mode and focus the matching timestamp",
         "admin sees unread feedback badges and can reply resolve reopen copy and soft-delete",
         "public token and encoded fallback routes survive refresh",
+        "first confirmed external playback creates one in-app activity event per video",
+        "admin activity shows unread first views and opens the viewed video",
+        "legacy encoded links keep playback without first-view tracking",
+        "admin copies a stable Notion embed link for a shared video",
+        "Notion embed starts playback at the recommended speed without full review chrome",
+        "only the dedicated embed route permits third-party framing",
       ]),
     );
   });

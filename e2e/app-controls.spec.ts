@@ -55,9 +55,116 @@ test("browser: admin uses the Pixel Point workspace and intentional mobile proje
   await expect(page.getByText(/active client links.*stop working/i)).toBeVisible();
 });
 
+test("browser: admin activity shows unread first views and opens the viewed video on mobile", async ({
+  page,
+}) => {
+  const activityVideo = {
+    assetId: "activity-video-1",
+    createdAt: "2026-08-14T07:00:00.000Z",
+    directVideoUrl: "https://video.gumlet.io/workspace/activity-video-1/main.mp4",
+    durationSeconds: 90,
+    id: "video_activity_1",
+    orderIndex: 0,
+    recommendedPlaybackSpeed: 1.5,
+    title: "Homepage activity review",
+    updatedAt: "2026-08-14T07:00:00.000Z",
+  };
+  const project = {
+    ...adminProjectFixture,
+    id: "project_activity_1",
+    name: "Activity project",
+    videos: [activityVideo],
+  };
+  let markedRead = false;
+
+  await page.route("**/api/admin/activity**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (url.pathname.endsWith("/read")) {
+      markedRead = true;
+      await route.fulfill({
+        body: JSON.stringify({ read: true }),
+        contentType: "application/json",
+      });
+      return;
+    }
+
+    await route.fulfill({
+      body: JSON.stringify({
+        emailConfigured: false,
+        events: [
+          {
+            emailStatus: "not-configured",
+            firstViewedAt: "2026-08-14T08:30:00.000Z",
+            id: "view_activity_1",
+            projectId: project.id,
+            projectName: project.name,
+            shareToken: "activity_token_1",
+            viewerEmail: "mira@example.com",
+            viewerName: "Mira",
+            videoId: activityVideo.id,
+            videoTitle: activityVideo.title,
+          },
+        ],
+        unreadCount: markedRead ? 0 : 1,
+      }),
+      contentType: "application/json",
+    });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/admin");
+  await page.evaluate(
+    ({ key, value }) => window.localStorage.setItem(key, JSON.stringify(value)),
+    { key: portalStorageKey, value: { projects: [project] } },
+  );
+  await page.reload();
+
+  await expect(page.getByRole("button", { name: /Activity.*1 unread/i })).toBeVisible();
+  await page.getByRole("button", { name: /Activity.*1 unread/i }).click();
+
+  const activityDialog = page.getByRole("dialog", { name: "Activity" });
+  await expect(activityDialog).toBeVisible();
+  await expect(activityDialog.getByText("Homepage activity review")).toBeVisible();
+  await expect(activityDialog.getByText("Mira", { exact: true })).toBeVisible();
+  await expect(activityDialog.getByText("mira@example.com")).toBeVisible();
+  await expect(
+    activityDialog.getByText("In-app activity is on. Email notifications aren't connected."),
+  ).toBeVisible();
+  await expect.poll(() => markedRead).toBe(true);
+
+  await activityDialog.getByRole("button", { name: "Open video" }).click();
+  await expect(activityDialog).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Homepage activity review" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Activity$/i })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(390);
+});
+
 test("browser: admin creates a project, adds a Gumlet video, and exposes a share link", async ({
   page,
 }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText(value: string) {
+          Object.assign(window, { __copiedPortalLink: value });
+          return Promise.resolve();
+        },
+      },
+    });
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      value(url?: string | URL) {
+        Object.assign(window, { __openedPortalLink: String(url ?? "") });
+        return null;
+      },
+    });
+  });
+
   await page.goto("/admin");
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
@@ -113,7 +220,32 @@ test("browser: admin creates a project, adds a Gumlet video, and exposes a share
   await expect(page.getByLabel("Share URL")).toHaveValue(
     /^http:\/\/localhost:\d+\/video\/hero-review-/,
   );
-  await expect(page.getByText("Video link ready")).toBeVisible();
+  await expect(page.getByLabel("Notion embed URL")).toHaveValue(
+    /^http:\/\/localhost:\d+\/embed\/video\/hero-review-/,
+  );
+  const notionEmbedUrl = await page.getByLabel("Notion embed URL").inputValue();
+  await expect(
+    page.getByText("In Notion, type /embed, paste this HTTPS URL, and choose Embed."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Copy embed link" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as typeof window & { __copiedPortalLink?: string }).__copiedPortalLink,
+      ),
+    )
+    .toBe(notionEmbedUrl);
+  await page.getByRole("button", { name: "Preview embed" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as typeof window & { __openedPortalLink?: string }).__openedPortalLink,
+      ),
+    )
+    .toBe(notionEmbedUrl);
+  await expect(page.getByText("Embed link copied")).toBeVisible();
   await page.getByRole("button", { name: "Close" }).click();
 
   await page.getByRole("button", { name: "Video actions for Hero review" }).click();

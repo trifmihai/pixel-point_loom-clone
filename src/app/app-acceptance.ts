@@ -4,7 +4,7 @@ export const appProductReadiness = {
   productSummary:
     "A focused video-sharing workspace for organizing Gumlet videos into stable client review links.",
   requestedBehavior:
-    "Create and manage projects, add Gumlet asset IDs or links, reuse stable project and video share links, let viewers choose playback speed, and collect D1-persisted timestamped visual feedback on cloud video tokens without changing public URL contracts.",
+    "Create and manage projects, add Gumlet asset IDs or links, reuse stable project and video share links, provide compact Notion embeds that start at the recommended speed, let viewers choose playback speed in the full review, collect D1-persisted timestamped visual feedback, and notify the admin in-app after the first external playback of each cloud-shared video without changing public URL contracts.",
 } as const;
 
 export const appAcceptance = [
@@ -22,4 +22,10 @@ export const appAcceptance = [
   "admin sees unread feedback badges and can reply resolve reopen copy and soft-delete",
   "public token and encoded fallback routes survive refresh",
   "passcode-protected links hide review details until unlocked",
+  "first confirmed external playback creates one in-app activity event per video",
+  "admin activity shows unread first views and opens the viewed video",
+  "legacy encoded links keep playback without first-view tracking",
+  "admin copies a stable Notion embed link for a shared video",
+  "Notion embed starts playback at the recommended speed without full review chrome",
+  "only the dedicated embed route permits third-party framing",
 ] as const;

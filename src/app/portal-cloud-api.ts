@@ -8,6 +8,12 @@ import type {
 } from "./feedback-types";
 import { mapFeedbackCommentRow } from "./feedback-utils";
 import { handleAdminFeedbackApi, handlePublicFeedbackApi } from "./portal-feedback-api";
+import type {
+  FirstVideoViewRecord,
+  FirstVideoViewRow,
+  FirstViewActivity,
+  FirstViewEmailStatus,
+} from "./first-view-types";
 
 type D1Result<T> = {
   results?: T[];
@@ -44,6 +50,9 @@ export type PortalShareLinkMatch = Pick<
 
 export type PortalCloudDatabase = {
   createFeedbackComment(record: FeedbackComment): Promise<FeedbackComment>;
+  createFirstVideoView(
+    record: FirstVideoViewRecord,
+  ): Promise<{ created: boolean; record: FirstVideoViewRecord }>;
   createShareLink(ownerEmail: string, record: PortalShareLinkRecord): Promise<PortalShareLinkRecord>;
   findReusableShareLink(
     ownerEmail: string,
@@ -54,7 +63,9 @@ export type PortalCloudDatabase = {
   getFeedbackCountsByVideo(ownerEmail: string): Promise<FeedbackVideoSummary[]>;
   listFeedbackForShareToken(token: string, videoId: string): Promise<FeedbackComment[]>;
   listFeedbackForVideo(ownerEmail: string, videoId: string): Promise<FeedbackComment[]>;
+  listFirstVideoViews(ownerEmail: string): Promise<FirstViewActivity[]>;
   listProjects(ownerEmail: string): Promise<PortalData>;
+  markFirstVideoViewsRead(ownerEmail: string, readAt: string): Promise<void>;
   markVideoFeedbackRead(ownerEmail: string, videoId: string, readAt: string): Promise<void>;
   replaceProjects(ownerEmail: string, data: PortalData): Promise<PortalData>;
   revokeShareLink(token: string, revokedAt: string): Promise<boolean>;
@@ -63,6 +74,10 @@ export type PortalCloudDatabase = {
     id: string,
     patch: FeedbackCommentPatch,
   ): Promise<FeedbackComment | null>;
+  updateFirstVideoViewEmailStatus(
+    videoId: string,
+    status: FirstViewEmailStatus,
+  ): Promise<void>;
 };
 
 export type PortalApiRuntime = {
@@ -71,6 +86,8 @@ export type PortalApiRuntime = {
   authSecret?: string;
   createToken?: () => string;
   db: PortalCloudDatabase;
+  defer?: (promise: Promise<unknown>) => void;
+  deliverFirstViewNotification?: (activity: FirstViewActivity) => Promise<void>;
   now?: () => Date;
   publicAppUrl: string;
 };
@@ -142,6 +159,20 @@ function errorResponse(status: number, code: string, message: string): Response 
     },
     { status },
   );
+}
+
+function activityDatabaseError(error: unknown): Response {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/first_video_views|no such table/i.test(message)) {
+    return errorResponse(
+      503,
+      "activity_migration_required",
+      "Activity storage is not ready. Apply the latest D1 migrations and try again.",
+    );
+  }
+
+  return errorResponse(500, "activity_failed", "The activity request could not be completed.");
 }
 
 function getConfiguredAdminPassword(runtime: PortalApiRuntime): Response | string {
@@ -447,6 +478,12 @@ function createToken(): string {
 
 function createId(prefix: string): string {
   return `${prefix}_${createToken().slice(0, 18)}`;
+}
+
+function optionalIdentity(value: unknown, maxLength: number): string | undefined {
+  return typeof value === "string" && value.trim()
+    ? value.trim().slice(0, maxLength)
+    : undefined;
 }
 
 async function readJsonBody<T>(request: Request): Promise<T> {
@@ -785,6 +822,90 @@ async function handlePublicShare(
     return handlePublicFeedbackApi(request, runtime, resolved);
   }
 
+  if (pathParts.length === 5 && pathParts[4] === "view") {
+    if (request.method !== "POST") {
+      return errorResponse(405, "method_not_allowed", "This view route only accepts POST.");
+    }
+
+    const session = await getAdminSession(request, runtime);
+
+    if (!(session instanceof Response) && session) {
+      return jsonResponse({ recorded: false });
+    }
+
+    if (resolved.passcodeHash) {
+      const suppliedPasscode = request.headers.get("X-Share-Passcode") ?? "";
+      const suppliedHash = await hashPasscode(suppliedPasscode);
+
+      if (!constantTimeEqual(suppliedHash, resolved.passcodeHash)) {
+        return errorResponse(403, "passcode_required", "Enter the share passcode to record this view.");
+      }
+    }
+
+    const body = await readJsonBody<{
+      videoId?: string;
+      viewerEmail?: string;
+      viewerName?: string;
+    }>(request);
+    const videoId = body.videoId?.trim() || resolved.videoId;
+
+    if (!videoId) {
+      return errorResponse(400, "video_required", "A video ID is required.");
+    }
+
+    if (resolved.videoId && resolved.videoId !== videoId) {
+      return errorResponse(404, "video_not_found", "This share token does not include that video.");
+    }
+
+    const data = await runtime.db.listProjects(resolved.ownerEmail);
+    const project = data.projects.find((candidate) => candidate.id === resolved.projectId);
+    const video = project?.videos.find((candidate) => candidate.id === videoId);
+
+    if (!project || !video) {
+      return errorResponse(404, "video_not_found", "This share token does not include that video.");
+    }
+
+    const emailStatus: FirstViewEmailStatus = runtime.deliverFirstViewNotification
+      ? "pending"
+      : "not-configured";
+    let result: { created: boolean; record: FirstVideoViewRecord };
+
+    try {
+      result = await runtime.db.createFirstVideoView({
+        emailStatus,
+        firstViewedAt: getNowIso(runtime),
+        id: createId("view"),
+        projectId: project.id,
+        shareToken: resolved.token,
+        viewerEmail: optionalIdentity(body.viewerEmail, 254),
+        viewerName: optionalIdentity(body.viewerName, 80),
+        videoId: video.id,
+      });
+    } catch (error) {
+      return activityDatabaseError(error);
+    }
+
+    if (result.created && runtime.deliverFirstViewNotification) {
+      const activity: FirstViewActivity = {
+        ...result.record,
+        projectName: project.name,
+        videoTitle: video.title,
+      };
+      const delivery = runtime
+        .deliverFirstViewNotification(activity)
+        .then(() => runtime.db.updateFirstVideoViewEmailStatus(video.id, "sent"))
+        .catch(() => runtime.db.updateFirstVideoViewEmailStatus(video.id, "failed"));
+
+      runtime.defer?.(delivery);
+
+      if (!runtime.defer) {
+        void delivery;
+      }
+    }
+
+    return jsonResponse({ recorded: result.created }, { status: result.created ? 201 : 200 });
+  }
+
   if (request.method === "GET" && pathParts.length === 4) {
     if (resolved.passcodeHash) {
       return jsonResponse({
@@ -859,6 +980,29 @@ export async function handlePortalApiRequest(
       return handleAdminShareLinks(request, runtime, authorization, pathParts);
     }
 
+    if (pathParts[2] === "activity") {
+      try {
+        if (request.method === "GET" && pathParts.length === 3) {
+          const events = await runtime.db.listFirstVideoViews(authorization);
+
+          return jsonResponse({
+            emailConfigured: Boolean(runtime.deliverFirstViewNotification),
+            events,
+            unreadCount: events.filter((event) => !event.adminReadAt).length,
+          });
+        }
+
+        if (request.method === "POST" && pathParts.length === 4 && pathParts[3] === "read") {
+          await runtime.db.markFirstVideoViewsRead(authorization, getNowIso(runtime));
+          return jsonResponse({ read: true });
+        }
+
+        return errorResponse(405, "method_not_allowed", "This activity route does not support this method.");
+      } catch (error) {
+        return activityDatabaseError(error);
+      }
+    }
+
     if (
       pathParts[2] === "feedback" ||
       (pathParts[2] === "videos" && pathParts[4] === "feedback")
@@ -879,11 +1023,25 @@ export async function handlePortalApiRequest(
 export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
   private readonly dataByOwnerEmail = new Map<string, PortalData>();
   private readonly feedbackComments = new Map<string, FeedbackComment>();
+  private readonly firstVideoViews = new Map<string, FirstVideoViewRecord>();
   private readonly shareLinks = new Map<string, PortalShareLinkRecord & { ownerEmail: string }>();
 
   async createFeedbackComment(record: FeedbackComment): Promise<FeedbackComment> {
     this.feedbackComments.set(record.id, clone(record));
     return clone(record);
+  }
+
+  async createFirstVideoView(
+    record: FirstVideoViewRecord,
+  ): Promise<{ created: boolean; record: FirstVideoViewRecord }> {
+    const existing = this.firstVideoViews.get(record.videoId);
+
+    if (existing) {
+      return { created: false, record: clone(existing) };
+    }
+
+    this.firstVideoViews.set(record.videoId, clone(record));
+    return { created: true, record: clone(record) };
   }
 
   async createShareLink(
@@ -1013,6 +1171,25 @@ export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
       .map(clone);
   }
 
+  async listFirstVideoViews(ownerEmail: string): Promise<FirstViewActivity[]> {
+    const data = this.dataByOwnerEmail.get(normalizeAdminEmail(ownerEmail));
+
+    if (!data) {
+      return [];
+    }
+
+    return Array.from(this.firstVideoViews.values())
+      .flatMap((record) => {
+        const project = data.projects.find((candidate) => candidate.id === record.projectId);
+        const video = project?.videos.find((candidate) => candidate.id === record.videoId);
+
+        return project && video
+          ? [{ ...clone(record), projectName: project.name, videoTitle: video.title }]
+          : [];
+      })
+      .sort((left, right) => right.firstViewedAt.localeCompare(left.firstViewedAt));
+  }
+
   getRawShareToken(token: string): (PortalShareLinkRecord & { ownerEmail: string }) | null {
     return this.shareLinks.get(token) ?? null;
   }
@@ -1048,6 +1225,14 @@ export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
           adminReadAt: readAt,
           updatedAt: readAt,
         });
+      }
+    }
+  }
+
+  async markFirstVideoViewsRead(ownerEmail: string, readAt: string): Promise<void> {
+    for (const [videoId, record] of this.firstVideoViews) {
+      if (this.ownerHasProject(ownerEmail, record.projectId)) {
+        this.firstVideoViews.set(videoId, { ...record, adminReadAt: readAt });
       }
     }
   }
@@ -1094,6 +1279,17 @@ export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
     return clone(updated);
   }
 
+  async updateFirstVideoViewEmailStatus(
+    videoId: string,
+    status: FirstViewEmailStatus,
+  ): Promise<void> {
+    const record = this.firstVideoViews.get(videoId);
+
+    if (record) {
+      this.firstVideoViews.set(videoId, { ...record, emailStatus: status });
+    }
+  }
+
   private ownerHasProject(ownerEmail: string, projectId: string): boolean {
     return Boolean(
       this.dataByOwnerEmail
@@ -1131,6 +1327,25 @@ type VideoRow = {
   title: string;
   updated_at: string;
 };
+
+type FirstViewActivityRow = FirstVideoViewRow & {
+  project_name: string;
+  video_title: string;
+};
+
+function mapFirstVideoViewRow(row: FirstVideoViewRow): FirstVideoViewRecord {
+  return {
+    adminReadAt: optionalString(row.admin_read_at),
+    emailStatus: row.email_status,
+    firstViewedAt: row.first_viewed_at,
+    id: row.id,
+    projectId: row.project_id,
+    shareToken: row.share_token,
+    viewerEmail: optionalString(row.viewer_email),
+    viewerName: optionalString(row.viewer_name),
+    videoId: row.video_id,
+  };
+}
 
 type ShareLinkRow = {
   created_at: string;
@@ -1229,6 +1444,44 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
       .run();
 
     return clone(record);
+  }
+
+  async createFirstVideoView(
+    record: FirstVideoViewRecord,
+  ): Promise<{ created: boolean; record: FirstVideoViewRecord }> {
+    await this.db
+      .prepare(
+        `INSERT OR IGNORE INTO first_video_views (
+          id, project_id, video_id, share_token, viewer_name, viewer_email,
+          first_viewed_at, admin_read_at, email_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        record.id,
+        record.projectId,
+        record.videoId,
+        record.shareToken,
+        record.viewerName ?? null,
+        record.viewerEmail ?? null,
+        record.firstViewedAt,
+        record.adminReadAt ?? null,
+        record.emailStatus,
+      )
+      .run();
+
+    const row = await this.db
+      .prepare("SELECT * FROM first_video_views WHERE video_id = ?")
+      .bind(record.videoId)
+      .first<FirstVideoViewRow>();
+
+    if (!row) {
+      throw new Error("The first video view could not be stored.");
+    }
+
+    return {
+      created: row.id === record.id,
+      record: mapFirstVideoViewRow(row),
+    };
   }
 
   async createShareLink(
@@ -1384,6 +1637,26 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
       .all<FeedbackCommentRow>();
 
     return (result.results ?? []).map(mapFeedbackCommentRow);
+  }
+
+  async listFirstVideoViews(ownerEmail: string): Promise<FirstViewActivity[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT first_video_views.*, projects.name AS project_name, videos.title AS video_title
+          FROM first_video_views
+          INNER JOIN projects ON projects.id = first_video_views.project_id
+          INNER JOIN videos ON videos.id = first_video_views.video_id
+          WHERE projects.owner_email = ?
+          ORDER BY first_video_views.first_viewed_at DESC`,
+      )
+      .bind(ownerEmail)
+      .all<FirstViewActivityRow>();
+
+    return (result.results ?? []).map((row) => ({
+      ...mapFirstVideoViewRow(row),
+      projectName: row.project_name,
+      videoTitle: row.video_title,
+    }));
   }
 
   async listProjects(ownerEmail: string): Promise<PortalData> {
@@ -1550,6 +1823,17 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
       .run();
   }
 
+  async markFirstVideoViewsRead(ownerEmail: string, readAt: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE first_video_views
+          SET admin_read_at = COALESCE(admin_read_at, ?)
+          WHERE project_id IN (SELECT id FROM projects WHERE owner_email = ?)`,
+      )
+      .bind(readAt, ownerEmail)
+      .run();
+  }
+
   async revokeShareLink(token: string, revokedAt: string): Promise<boolean> {
     await this.db
       .prepare("UPDATE share_links SET revoked_at = ? WHERE token = ?")
@@ -1585,5 +1869,15 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
       .run();
 
     return this.getFeedbackComment(ownerEmail, id);
+  }
+
+  async updateFirstVideoViewEmailStatus(
+    videoId: string,
+    status: FirstViewEmailStatus,
+  ): Promise<void> {
+    await this.db
+      .prepare("UPDATE first_video_views SET email_status = ? WHERE video_id = ?")
+      .bind(status, videoId)
+      .run();
   }
 }

@@ -2,3 +2,4 @@
 /admin/* /index.html 200
 /share/* /index.html 200
 /video/* /index.html 200
+/embed/video/* /index.html 200

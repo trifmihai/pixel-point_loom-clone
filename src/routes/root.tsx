@@ -1,6 +1,7 @@
 import { Outlet, createRootRoute, createRoute } from "@tanstack/react-router";
 
 import { SharePortal } from "../app/share-portal";
+import { VideoEmbedPortal } from "../app/video-embed-portal";
 import { VideoSharePortal } from "../app/video-share-portal";
 import { AdminHome } from "./admin";
 import { AppHome } from "./index";
@@ -44,6 +45,15 @@ const videoRoute = createRoute({
   }),
 });
 
+const videoEmbedRoute = createRoute({
+  component: VideoEmbedRoute,
+  getParentRoute: () => rootRoute,
+  path: "/embed/video/$slug",
+  validateSearch: (search: Record<string, unknown>) => ({
+    data: typeof search.data === "string" ? search.data : undefined,
+  }),
+});
+
 function ShareRoute(): React.JSX.Element {
   const { slug } = shareRoute.useParams();
   const { data } = shareRoute.useSearch();
@@ -58,4 +68,17 @@ function VideoRoute(): React.JSX.Element {
   return <VideoSharePortal directCommentId={comment} encodedData={data} slug={slug} />;
 }
 
-export const routeTree = rootRoute.addChildren([indexRoute, adminRoute, shareRoute, videoRoute]);
+function VideoEmbedRoute(): React.JSX.Element {
+  const { slug } = videoEmbedRoute.useParams();
+  const { data } = videoEmbedRoute.useSearch();
+
+  return <VideoEmbedPortal encodedData={data} slug={slug} />;
+}
+
+export const routeTree = rootRoute.addChildren([
+  indexRoute,
+  adminRoute,
+  shareRoute,
+  videoRoute,
+  videoEmbedRoute,
+]);
