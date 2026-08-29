@@ -93,6 +93,7 @@ describe("feedback utilities", () => {
         body: "Please update this heading.",
         created_at: "2026-07-17T10:00:00.000Z",
         deleted_at: null,
+        edit_token_hash: "storage-only-hash",
         id: "comment_1",
         parent_id: null,
         position_x: 20.5,

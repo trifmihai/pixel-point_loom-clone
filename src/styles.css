@@ -231,10 +231,11 @@ summary,
 }
 
 .notion-video-embed__footer {
-  display: grid;
+  display: flex;
   min-height: 34px;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   border-top: 1px solid var(--notion-border);
   padding: 6px 10px;
@@ -243,16 +244,42 @@ summary,
   line-height: 20px;
 }
 
-.notion-video-embed__client {
-  max-width: min(32vw, 14rem);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.notion-video-embed__comments-link {
+  flex: 0 0 auto;
+  border: 1px solid rgb(255 255 255 / 11%);
+  border-radius: 4px;
+  padding: 1px 7px;
+  color: var(--notion-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.notion-video-embed__comments-link:hover {
+  border-color: rgb(255 255 255 / 20%);
+  background: rgb(255 255 255 / 6%);
+  color: white;
 }
 
 .notion-video-embed__status {
+  display: flex;
+  flex: 1 1 18rem;
+  flex-wrap: wrap;
   min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 10px;
   text-align: right;
+}
+
+.notion-video-embed__status [role="status"] {
+  min-width: 0;
+}
+
+.notion-video-embed__saving {
+  flex: 0 0 auto;
+  color: #56d99b;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .notion-video-embed [role="status"] {
@@ -261,6 +288,18 @@ summary,
 
 .notion-video-embed [role="status"].text-emerald-300 {
   color: #68a878;
+}
+
+@media (max-width: 30rem) {
+  .notion-video-embed__footer {
+    gap: 4px 8px;
+  }
+
+  .notion-video-embed__status {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    text-align: left;
+  }
 }
 
 @media (min-width: 40rem) {

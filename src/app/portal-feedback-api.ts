@@ -39,10 +39,19 @@ function createFeedbackId(): string {
     .join("")}`;
 }
 
-async function hashPasscode(passcode: string): Promise<string> {
+function createFeedbackEditToken(): string {
+  const bytes = new Uint8Array(32);
+  globalThis.crypto.getRandomValues(bytes);
+
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function hashSecret(secret: string): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(passcode),
+    new TextEncoder().encode(secret),
   );
 
   return Array.from(new Uint8Array(digest))
@@ -72,7 +81,7 @@ async function authorizeFeedbackVideo(
 ): Promise<{ projectId: string; videoId: string } | Response> {
   if (record.passcodeHash) {
     const suppliedPasscode = request.headers.get("X-Share-Passcode") ?? "";
-    const suppliedHash = await hashPasscode(suppliedPasscode);
+    const suppliedHash = await hashSecret(suppliedPasscode);
 
     if (!constantTimeEqual(suppliedHash, record.passcodeHash)) {
       return errorResponse(403, "passcode_required", "Enter the share passcode to access feedback.");
@@ -117,8 +126,82 @@ export async function handlePublicFeedbackApi(
   request: Request,
   runtime: PortalApiRuntime,
   record: PortalShareLinkRecord & { ownerEmail: string },
+  commentId?: string,
 ): Promise<Response> {
   const url = new URL(request.url);
+
+  if (commentId) {
+    if (request.method !== "PATCH" && request.method !== "DELETE") {
+      return errorResponse(
+        405,
+        "method_not_allowed",
+        "This feedback comment route accepts PATCH and DELETE.",
+      );
+    }
+
+    const authorized = await authorizeFeedbackVideo(
+      request,
+      runtime,
+      record,
+      url.searchParams.get("videoId") ?? undefined,
+    );
+
+    if (authorized instanceof Response) {
+      return authorized;
+    }
+
+    const editToken = request.headers.get("X-Feedback-Edit-Token")?.trim() ?? "";
+
+    if (!editToken) {
+      return errorResponse(
+        403,
+        "feedback_edit_forbidden",
+        "This browser does not own that feedback comment.",
+      );
+    }
+
+    const now = getNowIso(runtime);
+    let body: string | undefined;
+
+    if (request.method === "PATCH") {
+      const input = await readJsonBody<{ body?: unknown }>(request);
+      body = typeof input.body === "string" ? input.body.trim() : "";
+
+      if (!body || body.length > 1000) {
+        return errorResponse(
+          400,
+          "feedback_body_invalid",
+          "Feedback must be between 1 and 1000 characters.",
+        );
+      }
+    }
+
+    try {
+      const updated = await runtime.db.updatePublicFeedbackComment({
+        ...(body !== undefined ? { body } : {}),
+        ...(request.method === "DELETE" ? { deletedAt: now } : {}),
+        editTokenHash: await hashSecret(editToken),
+        id: commentId,
+        shareToken: record.token,
+        updatedAt: now,
+        videoId: authorized.videoId,
+      });
+
+      if (!updated) {
+        return errorResponse(
+          403,
+          "feedback_edit_forbidden",
+          "This browser does not own that feedback comment.",
+        );
+      }
+
+      return request.method === "DELETE"
+        ? jsonResponse({ deleted: true, id: updated.id })
+        : jsonResponse(toPublicFeedbackComment(updated));
+    } catch (error) {
+      return feedbackDatabaseError(error);
+    }
+  }
 
   if (request.method === "GET") {
     const authorized = await authorizeFeedbackVideo(
@@ -172,6 +255,7 @@ export async function handlePublicFeedbackApi(
     }
 
     const now = getNowIso(runtime);
+    const editToken = createFeedbackEditToken();
     const comment: FeedbackComment = {
       authorEmail: validation.input.authorEmail,
       authorName: validation.input.authorName,
@@ -191,7 +275,15 @@ export async function handlePublicFeedbackApi(
 
     try {
       return jsonResponse(
-        toPublicFeedbackComment(await runtime.db.createFeedbackComment(comment)),
+        {
+          comment: toPublicFeedbackComment(
+            await runtime.db.createFeedbackComment(
+              comment,
+              await hashSecret(editToken),
+            ),
+          ),
+          editToken,
+        },
         { status: 201 },
       );
     } catch (error) {

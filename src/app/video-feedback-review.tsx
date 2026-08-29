@@ -1,7 +1,23 @@
 import * as React from "react";
-import { CheckCircle2, Clock3, MessageSquarePlus, RotateCcw, X } from "lucide-react";
+import {
+  CheckCircle2,
+  Clock3,
+  MessageSquarePlus,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Badge,
   Button,
   Card,
@@ -22,6 +38,11 @@ import type {
   GuestFeedbackIdentity,
   PublicFeedbackComment,
 } from "./feedback-types";
+import {
+  getFeedbackEditToken,
+  removeFeedbackEditToken,
+  saveFeedbackEditToken,
+} from "./feedback-ownership";
 import { calculateVideoPositionPercent, validatePublicFeedbackInput } from "./feedback-utils";
 import { getPortalApiErrorMessage, portalApi, PortalApiError } from "./portal-api";
 import { formatDuration } from "./portal-utils";
@@ -129,6 +150,14 @@ export function VideoFeedbackReview({
   const [body, setBody] = React.useState("");
   const [submitError, setSubmitError] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+  const [editingCommentId, setEditingCommentId] = React.useState<string | null>(null);
+  const [editBody, setEditBody] = React.useState("");
+  const [deleteTarget, setDeleteTarget] = React.useState<PublicFeedbackComment | null>(null);
+  const [mutatingCommentId, setMutatingCommentId] = React.useState<string | null>(null);
+  const [mutationError, setMutationError] = React.useState<{
+    id: string;
+    message: string;
+  } | null>(null);
   const commentRefs = React.useRef(new Map<string, HTMLElement>());
   const directHandledRef = React.useRef<string | null>(null);
   const threads = React.useMemo(() => getThreads(comments), [comments]);
@@ -157,6 +186,41 @@ export function VideoFeedbackReview({
   React.useEffect(() => {
     void loadComments();
   }, [loadComments]);
+
+  React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    function handleModeShortcut(event: KeyboardEvent): void {
+      if (
+        event.key.toLowerCase() !== "c" ||
+        event.repeat ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey
+      ) {
+        return;
+      }
+
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+        )
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      changeMode(mode === "watch" ? "review" : "watch");
+    }
+
+    document.addEventListener("keydown", handleModeShortcut);
+    return () => document.removeEventListener("keydown", handleModeShortcut);
+  }, [enabled, mode, onModeChange, onPause, onRequestCurrentTime]);
 
   React.useEffect(() => {
     if (!placement || !Number.isFinite(currentTimeSeconds)) {
@@ -261,8 +325,14 @@ export function VideoFeedbackReview({
 
     try {
       const created = await portalApi.createPublicComment(token, validation.input, passcode);
-      setComments((current) => [...current, created]);
-      setSelectedCommentId(created.id);
+      saveFeedbackEditToken(
+        window.localStorage,
+        token,
+        created.comment.id,
+        created.editToken,
+      );
+      setComments((current) => [...current, created.comment]);
+      setSelectedCommentId(created.comment.id);
       saveGuestIdentity({ email: identity.email.trim(), name: identity.name.trim() });
       setIdentity((current) => ({
         email: current.email.trim(),
@@ -281,17 +351,130 @@ export function VideoFeedbackReview({
     }
   }
 
+  function beginEdit(comment: PublicFeedbackComment): void {
+    setEditingCommentId(comment.id);
+    setEditBody(comment.body);
+    setMutationError(null);
+  }
+
+  function cancelEdit(): void {
+    setEditingCommentId(null);
+    setEditBody("");
+    setMutationError(null);
+  }
+
+  async function saveEdit(comment: PublicFeedbackComment): Promise<void> {
+    const trimmedBody = editBody.trim();
+
+    if (!trimmedBody || trimmedBody.length > 1000) {
+      setMutationError({
+        id: comment.id,
+        message: "Feedback must be between 1 and 1000 characters.",
+      });
+      return;
+    }
+
+    const editToken = getFeedbackEditToken(window.localStorage, token, comment.id);
+
+    if (!editToken) {
+      setMutationError({
+        id: comment.id,
+        message: "This browser no longer has permission to edit that comment.",
+      });
+      return;
+    }
+
+    setMutatingCommentId(comment.id);
+    setMutationError(null);
+
+    try {
+      const updated = await portalApi.updatePublicComment(
+        token,
+        videoId,
+        comment.id,
+        { body: trimmedBody },
+        editToken,
+        passcode,
+      );
+      setComments((current) =>
+        current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+      setEditingCommentId(null);
+      setEditBody("");
+    } catch (error) {
+      setMutationError({
+        id: comment.id,
+        message: getPortalApiErrorMessage(error),
+      });
+    } finally {
+      setMutatingCommentId(null);
+    }
+  }
+
+  async function deleteComment(comment: PublicFeedbackComment): Promise<void> {
+    const editToken = getFeedbackEditToken(window.localStorage, token, comment.id);
+
+    if (!editToken) {
+      setMutationError({
+        id: comment.id,
+        message: "This browser no longer has permission to delete that comment.",
+      });
+      return;
+    }
+
+    setMutatingCommentId(comment.id);
+    setMutationError(null);
+
+    try {
+      await portalApi.deletePublicComment(
+        token,
+        videoId,
+        comment.id,
+        editToken,
+        passcode,
+      );
+      setComments((current) =>
+        current.filter(
+          (candidate) => candidate.id !== comment.id && candidate.parentId !== comment.id,
+        ),
+      );
+      setSelectedCommentId((current) => (current === comment.id ? null : current));
+      removeFeedbackEditToken(window.localStorage, comment.id);
+      setDeleteTarget(null);
+      setEditingCommentId((current) => (current === comment.id ? null : current));
+    } catch (error) {
+      setMutationError({
+        id: comment.id,
+        message: getPortalApiErrorMessage(error),
+      });
+    } finally {
+      setMutatingCommentId(null);
+    }
+  }
+
   if (!enabled) {
     return <div id="video-player">{children}</div>;
   }
 
   return (
-    <section aria-label="Video feedback review" className="space-y-3" id="video-player">
+    <section
+      aria-keyshortcuts="C"
+      aria-label="Video feedback review"
+      className="space-y-3"
+      id="video-player"
+    >
+      <p aria-live="polite" className="sr-only">
+        {mode === "review" ? "Review mode active" : "Watch mode active"}
+      </p>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-white">Viewing mode</p>
+          <p className="text-sm font-medium text-white">
+            {mode === "review" ? "Review mode" : "Watch mode"}
+          </p>
           <p className="text-xs text-[color:var(--muted-foreground)]">
-            Place feedback directly on the video in Review mode.
+            {mode === "review"
+              ? "Click the video to leave feedback. Press C to switch to Watch."
+              : "Watch without comment controls. Press C to switch to Review."}
           </p>
         </div>
         <div
@@ -322,7 +505,15 @@ export function VideoFeedbackReview({
         </div>
       </div>
 
-      <div className="relative">
+      <div
+        className={`relative rounded-xl transition-[box-shadow] duration-200 ${
+          mode === "review"
+            ? "shadow-[0_0_0_2px_rgba(125,211,252,0.45),0_0_28px_rgba(56,189,248,0.14)]"
+            : ""
+        }`}
+        data-mode={mode}
+        data-testid="video-review-frame"
+      >
         {children}
 
         {mode === "review" ? (
@@ -538,9 +729,88 @@ export function VideoFeedbackReview({
                       {formatDuration(comment.timestampSeconds)}
                     </Button>
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/90">
-                    {comment.body}
-                  </p>
+                  {editingCommentId === comment.id ? (
+                    <form
+                      className="mt-3"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveEdit(comment);
+                      }}
+                    >
+                      <Field>
+                        <FieldLabel htmlFor={`feedback-edit-${comment.id}`}>
+                          Edit comment
+                        </FieldLabel>
+                        <Textarea
+                          autoFocus
+                          id={`feedback-edit-${comment.id}`}
+                          maxLength={1000}
+                          onChange={(event) => setEditBody(event.target.value)}
+                          required
+                          rows={4}
+                          value={editBody}
+                        />
+                      </Field>
+                      {mutationError?.id === comment.id ? (
+                        <p
+                          aria-live="polite"
+                          className="mt-2 text-sm text-red-300"
+                          role="alert"
+                        >
+                          {mutationError.message}
+                        </p>
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap justify-end gap-2">
+                        <Button
+                          disabled={mutatingCommentId === comment.id}
+                          onClick={cancelEdit}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={mutatingCommentId === comment.id}
+                          size="sm"
+                          type="submit"
+                        >
+                          {mutatingCommentId === comment.id ? "Saving…" : "Save changes"}
+                        </Button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/90">
+                        {comment.body}
+                      </p>
+                      {getFeedbackEditToken(window.localStorage, token, comment.id) ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            onClick={() => beginEdit(comment)}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Pencil />
+                            Edit
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              setMutationError(null);
+                              setDeleteTarget(comment);
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 />
+                            Delete
+                          </Button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
                   {replies.length > 0 ? (
                     <div className="mt-4 space-y-3 border-l border-sky-300/25 pl-4">
                       {replies.map((reply) => (
@@ -575,6 +845,44 @@ export function VideoFeedbackReview({
           </CardContent>
         </Card>
       ) : null}
+
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open && !mutatingCommentId) {
+            setDeleteTarget(null);
+            setMutationError(null);
+          }
+        }}
+        open={Boolean(deleteTarget)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this comment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The comment, its video pin, and its replies will disappear from this review.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteTarget && mutationError?.id === deleteTarget.id ? (
+            <p aria-live="polite" className="text-sm text-red-300" role="alert">
+              {mutationError.message}
+            </p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(mutatingCommentId)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!deleteTarget || mutatingCommentId === deleteTarget.id}
+              onClick={() => deleteTarget && void deleteComment(deleteTarget)}
+              variant="destructive"
+            >
+              {deleteTarget && mutatingCommentId === deleteTarget.id
+                ? "Deleting…"
+                : "Delete comment"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

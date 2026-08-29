@@ -4,7 +4,7 @@ export const appProductReadiness = {
   productSummary:
     "A focused video-sharing workspace for organizing Gumlet videos into stable client review links.",
   requestedBehavior:
-    "Create and manage projects, add Gumlet asset IDs or links, reuse stable project and video share links, provide compact scrollbar-free Notion dark-mode embeds that start at the recommended speed, let viewers choose playback speed in the full review, collect D1-persisted timestamped visual feedback, and notify the admin in-app after the first external playback of each cloud-shared video without changing public URL contracts.",
+    "Create and manage projects, add Gumlet asset IDs or links, reuse stable project and video share links, provide compact scrollbar-free Notion dark-mode embeds that start at the recommended speed and open cloud feedback in Watch mode, let viewers toggle Watch and Review with C, collect D1-persisted timestamped visual feedback, let the creating browser edit or soft-delete its guest comments without exposing ownership secrets, and notify the admin in-app after the first external playback of each cloud-shared video without changing public URL contracts.",
 } as const;
 
 export const appAcceptance = [
@@ -18,6 +18,8 @@ export const appAcceptance = [
   "project collection keeps video navigation before playback on mobile",
   "share page records timestamped notes locally",
   "cloud video review places timestamped positioned feedback persisted through the public API",
+  "cloud video Watch and Review modes toggle with C and visibly distinguish Review mode",
+  "same-browser guest comments can be edited or soft-deleted without exposing ownership secrets",
   "direct comment links open Review mode and focus the matching timestamp",
   "admin sees unread feedback badges and can reply resolve reopen copy and soft-delete",
   "public token and encoded fallback routes survive refresh",
@@ -27,6 +29,8 @@ export const appAcceptance = [
   "legacy encoded links keep playback without first-view tracking",
   "admin copies a stable Notion embed link for a shared video",
   "Notion embed exposes native playback at the recommended speed without review navigation or feedback chrome",
+  "cloud Notion embed opens Leave comments in a Watch-mode page and shows exact saved time",
+  "legacy Notion embed omits the cloud comment action",
   "Notion embed chrome matches a compact Notion dark-mode content block",
   "Notion embed hides its internal scrollbar without disabling overflow scrolling",
   "only the dedicated embed route permits third-party framing",

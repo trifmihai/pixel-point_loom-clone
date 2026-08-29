@@ -242,9 +242,16 @@ export function VideoSharePortal({
     playbackSavings && playbackSavings.savedSeconds > 0
       ? `Save about ${formatSavedTime(playbackSavings.savedSeconds)}`
       : null;
+  const embedSavedTimeLabel =
+    playbackSavings && playbackSavings.savedSeconds > 0
+      ? `Save ${formatSavedTime(playbackSavings.savedSeconds)}`
+      : null;
   const watchTimeLabel = playbackSavings
     ? `Watch in about ${formatDuration(playbackSavings.fasterSeconds)}`
     : null;
+  const reviewHref = `/video/${encodeURIComponent(slug)}${
+    encodedData ? `?${new URLSearchParams({ data: encodedData }).toString()}` : ""
+  }`;
   const durationButtonMeta = durationDetectionTimedOut ? durationFallbackMessage : "Loading duration";
 
   React.useEffect(() => {
@@ -741,9 +748,16 @@ export function VideoSharePortal({
           </div>
 
           <footer className="notion-video-embed__footer">
-            <span className="notion-video-embed__client">
-              {project.clientName || "Client review"}
-            </span>
+            {cloudTokenResolved ? (
+              <a
+                className="notion-video-embed__comments-link"
+                href={reviewHref}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Leave comments
+              </a>
+            ) : null}
             <div className="notion-video-embed__status">
               <PortalStatus
                 message={
@@ -756,6 +770,9 @@ export function VideoSharePortal({
                   gumletPlaybackStatus.startsWith("Playback confirmed") ? "success" : "default"
                 }
               />
+              {embedSavedTimeLabel ? (
+                <span className="notion-video-embed__saving">{embedSavedTimeLabel}</span>
+              ) : null}
             </div>
           </footer>
         </div>

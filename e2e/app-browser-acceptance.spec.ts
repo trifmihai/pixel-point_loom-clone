@@ -398,6 +398,36 @@ test("browser: cloud video Review mode persists positioned feedback and guest id
 
   await page.route("**/api/public/share/feedback_token**", async (route) => {
     const url = new URL(route.request().url());
+    const commentMember = url.pathname.match(/\/comments\/([^/]+)$/);
+
+    if (commentMember) {
+      const commentIndex = comments.findIndex(
+        (comment) => comment.id === decodeURIComponent(commentMember[1]!),
+      );
+
+      if (route.request().method() === "PATCH" && commentIndex >= 0) {
+        const input = route.request().postDataJSON() as { body: string };
+        comments[commentIndex] = {
+          ...comments[commentIndex],
+          body: input.body.trim(),
+          updatedAt: "2026-07-17T15:05:00.000Z",
+        };
+        await route.fulfill({
+          body: JSON.stringify(comments[commentIndex]),
+          contentType: "application/json",
+        });
+        return;
+      }
+
+      if (route.request().method() === "DELETE" && commentIndex >= 0) {
+        const [deleted] = comments.splice(commentIndex, 1);
+        await route.fulfill({
+          body: JSON.stringify({ deleted: true, id: deleted!.id }),
+          contentType: "application/json",
+        });
+        return;
+      }
+    }
 
     if (url.pathname.endsWith("/comments")) {
       if (route.request().method() === "POST") {
@@ -416,7 +446,11 @@ test("browser: cloud video Review mode persists positioned feedback and guest id
           videoId: "video_share_1",
         };
         comments.push(created);
-        await route.fulfill({ body: JSON.stringify(created), contentType: "application/json", status: 201 });
+        await route.fulfill({
+          body: JSON.stringify({ comment: created, editToken: "edit-token-1" }),
+          contentType: "application/json",
+          status: 201,
+        });
         return;
       }
 
@@ -449,13 +483,46 @@ test("browser: cloud video Review mode persists positioned feedback and guest id
   await page.evaluate(() => window.localStorage.clear());
   await page.reload();
 
-  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await expect(page.getByText("Watch mode", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Video feedback review" })).toHaveAttribute(
+    "aria-keyshortcuts",
+    "C",
+  );
+  await page.locator("video").evaluate((element) => {
+    const video = element as HTMLVideoElement;
+    const originalPause = video.pause.bind(video);
+    const trackedWindow = window as Window & { __feedbackPauseCalls?: number };
+    trackedWindow.__feedbackPauseCalls = 0;
+    video.pause = () => {
+      trackedWindow.__feedbackPauseCalls = (trackedWindow.__feedbackPauseCalls ?? 0) + 1;
+      originalPause();
+    };
+  });
+  await page.keyboard.press("c");
+  await expect(page.getByText("Review mode", { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { __feedbackPauseCalls?: number }).__feedbackPauseCalls ?? 0,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await expect(page.getByTestId("video-review-frame")).toHaveAttribute("data-mode", "review");
+  await expect(page.getByTestId("video-review-frame")).not.toHaveCSS("box-shadow", "none");
+  await page.keyboard.press("c");
+  await expect(page.getByText("Watch mode", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("video-review-frame")).toHaveAttribute("data-mode", "watch");
+  await expect(page.getByTestId("video-review-frame")).toHaveCSS("box-shadow", "none");
+  await page.keyboard.press("c");
   const placementButton = page.getByRole("button", { name: "Place feedback on video" });
   await placementButton.click({ position: { x: 120, y: 110 } });
 
   await page.getByLabel("Name").fill("Mira");
   await page.getByLabel("Email (optional)").fill("mira@example.com");
   await page.getByLabel("Comment").fill("Please tighten this transition.");
+  await page.getByLabel("Comment").press("c");
+  await expect(page.getByText("Review mode", { exact: true })).toBeVisible();
+  await page.getByLabel("Comment").press("Backspace");
   await page.getByRole("button", { name: "Add comment" }).click();
 
   await expect(page.getByText("Please tighten this transition.")).toBeVisible();
@@ -472,8 +539,25 @@ test("browser: cloud video Review mode persists positioned feedback and guest id
   expect(Number(capturedInput?.positionY)).toBeLessThan(100);
 
   await page.reload();
-  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await expect(page.getByText("Watch mode", { exact: true })).toBeVisible();
+  await page.keyboard.press("c");
+  await expect(page.getByText("Review mode", { exact: true })).toBeVisible();
   await expect(page.getByText("Please tighten this transition.")).toBeVisible();
+  const ownedComment = page.locator("article", {
+    hasText: "Please tighten this transition.",
+  });
+  await ownedComment.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Edit comment").fill("Please tighten this transition sooner.");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Please tighten this transition sooner.")).toBeVisible();
+  await page
+    .locator("article", { hasText: "Please tighten this transition sooner." })
+    .getByRole("button", { name: "Delete" })
+    .click();
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await page.getByRole("button", { name: "Delete comment" }).click();
+  await expect(page.getByText("Please tighten this transition sooner.")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Open feedback 1 at/ })).toHaveCount(0);
   await placementButton.click({ position: { x: 180, y: 130 } });
   await expect(page.getByLabel("Name")).toHaveValue("Mira");
   await expect(page.getByLabel("Email (optional)")).toHaveValue("mira@example.com");
@@ -530,6 +614,11 @@ test("browser: direct comment link opens Review mode and focuses the matching fe
     "true",
   );
   await expect(page.getByText("Align this card with the heading.")).toBeVisible();
+  const readOnlyComment = page.locator("article", {
+    hasText: "Align this card with the heading.",
+  });
+  await expect(readOnlyComment.getByRole("button", { name: "Edit" })).toHaveCount(0);
+  await expect(readOnlyComment.getByRole("button", { name: "Delete" })).toHaveCount(0);
   await expect
     .poll(() =>
       page.locator("article", { hasText: "Align this card with the heading." }).evaluate(
@@ -662,7 +751,10 @@ test("browser: Notion embed plays the shared video in place at the recommended s
 
   await expect(page.getByTestId("notion-video-embed")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
-  await expect(page.getByText("Client review", { exact: true })).toBeVisible();
+  await expect(
+    page.locator("footer").getByText("Client review", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Leave comments" })).toHaveCount(0);
   await expect(page.getByText("Recommended 1.5x", { exact: true })).toBeVisible();
   await expect(page.getByText("Watch in about 8:00", { exact: true })).toBeVisible();
   await expect(page.getByText("Save about 4:00", { exact: true })).toBeVisible();
@@ -764,7 +856,7 @@ test("browser: Notion embed records first playback once without adding an identi
   let viewCalls = 0;
   let viewInput: Record<string, unknown> | null = null;
 
-  await page.route("**/api/public/share/embed_view_token**", async (route) => {
+  await page.context().route("**/api/public/share/embed_view_token**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
@@ -816,6 +908,22 @@ test("browser: Notion embed records first playback once without adding an identi
   await expect(page.getByTestId("notion-video-embed")).toBeVisible();
   await expect(page.getByLabel("Name")).toHaveCount(0);
   await expect(page.getByLabel("Email (optional)")).toHaveCount(0);
+  await expect(page.getByText("Save 4:00", { exact: true })).toBeVisible();
+  const leaveComments = page.getByRole("link", { name: "Leave comments" });
+  await expect(leaveComments).toHaveAttribute("href", "/video/embed_view_token");
+  await expect(leaveComments).toHaveAttribute("target", "_blank");
+  await expect(page.getByText("Acme", { exact: true })).toHaveCount(0);
+
+  const [reviewPage] = await Promise.all([
+    page.waitForEvent("popup"),
+    leaveComments.click(),
+  ]);
+  await expect(reviewPage.getByText("Watch mode", { exact: true })).toBeVisible();
+  await expect(reviewPage.getByRole("button", { name: "Watch", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await reviewPage.close();
 
   await page.locator("video").dispatchEvent("play");
   await expect.poll(() => viewCalls).toBe(1);

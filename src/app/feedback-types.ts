@@ -47,6 +47,20 @@ export type CreatePublicFeedbackInput = {
   videoId: string;
 };
 
+export type CreatePublicFeedbackResponse = {
+  comment: PublicFeedbackComment;
+  editToken: string;
+};
+
+export type UpdatePublicFeedbackInput = {
+  body: string;
+};
+
+export type DeletePublicFeedbackResponse = {
+  deleted: true;
+  id: string;
+};
+
 export type CreateAdminReplyInput = {
   body: string;
 };
@@ -87,6 +101,7 @@ export type FeedbackCommentRow = {
   body: string;
   created_at: string;
   deleted_at: string | null;
+  edit_token_hash: string | null;
   id: string;
   parent_id: string | null;
   position_x: number | null;

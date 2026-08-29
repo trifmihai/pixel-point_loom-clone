@@ -72,6 +72,9 @@ const unavailableDatabase: PortalCloudDatabase = {
   updateFeedbackComment: () => {
     throw new Error("D1 binding DB is not configured.");
   },
+  updatePublicFeedbackComment: () => {
+    throw new Error("D1 binding DB is not configured.");
+  },
   updateFirstVideoViewEmailStatus: () => {
     throw new Error("D1 binding DB is not configured.");
   },

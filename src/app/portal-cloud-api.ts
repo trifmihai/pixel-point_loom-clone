@@ -49,7 +49,10 @@ export type PortalShareLinkMatch = Pick<
 >;
 
 export type PortalCloudDatabase = {
-  createFeedbackComment(record: FeedbackComment): Promise<FeedbackComment>;
+  createFeedbackComment(
+    record: FeedbackComment,
+    editTokenHash?: string,
+  ): Promise<FeedbackComment>;
   createFirstVideoView(
     record: FirstVideoViewRecord,
   ): Promise<{ created: boolean; record: FirstVideoViewRecord }>;
@@ -74,6 +77,15 @@ export type PortalCloudDatabase = {
     id: string,
     patch: FeedbackCommentPatch,
   ): Promise<FeedbackComment | null>;
+  updatePublicFeedbackComment(input: {
+    body?: string;
+    deletedAt?: string;
+    editTokenHash: string;
+    id: string;
+    shareToken: string;
+    updatedAt: string;
+    videoId: string;
+  }): Promise<FeedbackComment | null>;
   updateFirstVideoViewEmailStatus(
     videoId: string,
     status: FirstViewEmailStatus,
@@ -818,8 +830,11 @@ async function handlePublicShare(
     return resolved;
   }
 
-  if (pathParts.length === 5 && pathParts[4] === "comments") {
-    return handlePublicFeedbackApi(request, runtime, resolved);
+  if (
+    (pathParts.length === 5 || pathParts.length === 6) &&
+    pathParts[4] === "comments"
+  ) {
+    return handlePublicFeedbackApi(request, runtime, resolved, pathParts[5]);
   }
 
   if (pathParts.length === 5 && pathParts[4] === "view") {
@@ -1023,11 +1038,18 @@ export async function handlePortalApiRequest(
 export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
   private readonly dataByOwnerEmail = new Map<string, PortalData>();
   private readonly feedbackComments = new Map<string, FeedbackComment>();
+  private readonly feedbackEditTokenHashes = new Map<string, string>();
   private readonly firstVideoViews = new Map<string, FirstVideoViewRecord>();
   private readonly shareLinks = new Map<string, PortalShareLinkRecord & { ownerEmail: string }>();
 
-  async createFeedbackComment(record: FeedbackComment): Promise<FeedbackComment> {
+  async createFeedbackComment(
+    record: FeedbackComment,
+    editTokenHash?: string,
+  ): Promise<FeedbackComment> {
     this.feedbackComments.set(record.id, clone(record));
+    if (editTokenHash) {
+      this.feedbackEditTokenHashes.set(record.id, editTokenHash);
+    }
     return clone(record);
   }
 
@@ -1279,6 +1301,40 @@ export class MemoryPortalCloudDatabase implements PortalCloudDatabase {
     return clone(updated);
   }
 
+  async updatePublicFeedbackComment(input: {
+    body?: string;
+    deletedAt?: string;
+    editTokenHash: string;
+    id: string;
+    shareToken: string;
+    updatedAt: string;
+    videoId: string;
+  }): Promise<FeedbackComment | null> {
+    const current = this.feedbackComments.get(input.id);
+
+    if (
+      !current ||
+      current.shareToken !== input.shareToken ||
+      current.videoId !== input.videoId ||
+      current.authorRole !== "guest" ||
+      current.parentId ||
+      current.deletedAt ||
+      this.feedbackEditTokenHashes.get(input.id) !== input.editTokenHash
+    ) {
+      return null;
+    }
+
+    const updated: FeedbackComment = {
+      ...current,
+      ...(input.body !== undefined ? { body: input.body } : {}),
+      ...(input.deletedAt !== undefined ? { deletedAt: input.deletedAt } : {}),
+      updatedAt: input.updatedAt,
+    };
+
+    this.feedbackComments.set(input.id, updated);
+    return clone(updated);
+  }
+
   async updateFirstVideoViewEmailStatus(
     videoId: string,
     status: FirstViewEmailStatus,
@@ -1413,14 +1469,17 @@ export function createD1PortalDatabase(db: D1DatabaseLike): PortalCloudDatabase 
 class D1PortalCloudDatabase implements PortalCloudDatabase {
   constructor(private readonly db: D1DatabaseLike) {}
 
-  async createFeedbackComment(record: FeedbackComment): Promise<FeedbackComment> {
+  async createFeedbackComment(
+    record: FeedbackComment,
+    editTokenHash?: string,
+  ): Promise<FeedbackComment> {
     await this.db
       .prepare(
         `INSERT INTO feedback_comments (
           id, share_token, project_id, video_id, parent_id, author_name, author_email,
           author_role, body, timestamp_seconds, position_x, position_y, status,
-          admin_read_at, created_at, updated_at, deleted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          admin_read_at, created_at, updated_at, deleted_at, edit_token_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.id,
@@ -1440,6 +1499,7 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
         record.createdAt,
         record.updatedAt,
         record.deletedAt ?? null,
+        editTokenHash ?? null,
       )
       .run();
 
@@ -1869,6 +1929,44 @@ class D1PortalCloudDatabase implements PortalCloudDatabase {
       .run();
 
     return this.getFeedbackComment(ownerEmail, id);
+  }
+
+  async updatePublicFeedbackComment(input: {
+    body?: string;
+    deletedAt?: string;
+    editTokenHash: string;
+    id: string;
+    shareToken: string;
+    updatedAt: string;
+    videoId: string;
+  }): Promise<FeedbackComment | null> {
+    const row = await this.db
+      .prepare(
+        `UPDATE feedback_comments SET
+          body = COALESCE(?, body),
+          deleted_at = COALESCE(?, deleted_at),
+          updated_at = ?
+          WHERE id = ?
+            AND share_token = ?
+            AND video_id = ?
+            AND edit_token_hash = ?
+            AND author_role = 'guest'
+            AND parent_id IS NULL
+            AND deleted_at IS NULL
+          RETURNING *`,
+      )
+      .bind(
+        input.body ?? null,
+        input.deletedAt ?? null,
+        input.updatedAt,
+        input.id,
+        input.shareToken,
+        input.videoId,
+        input.editTokenHash,
+      )
+      .first<FeedbackCommentRow>();
+
+    return row ? mapFeedbackCommentRow(row) : null;
   }
 
   async updateFirstVideoViewEmailStatus(

@@ -2,10 +2,13 @@ import type { PortalData, PortalProject, VideoShareSnapshot } from "./portal-typ
 import type {
   CreateAdminReplyInput,
   CreatePublicFeedbackInput,
+  CreatePublicFeedbackResponse,
+  DeletePublicFeedbackResponse,
   FeedbackComment,
   FeedbackSummaryResponse,
   PublicFeedbackComment,
   UpdateFeedbackInput,
+  UpdatePublicFeedbackInput,
 } from "./feedback-types";
 import type { FirstViewActivityResponse } from "./first-view-types";
 
@@ -143,13 +146,36 @@ export const portalApi = {
     token: string,
     input: CreatePublicFeedbackInput,
     passcode?: string,
-  ): Promise<PublicFeedbackComment> {
-    return requestJson<PublicFeedbackComment>(
+  ): Promise<CreatePublicFeedbackResponse> {
+    return requestJson<CreatePublicFeedbackResponse>(
       `/api/public/share/${encodeURIComponent(token)}/comments`,
       {
         body: JSON.stringify(input),
         headers: passcode ? { "X-Share-Passcode": passcode } : undefined,
         method: "POST",
+      },
+    );
+  },
+
+  deletePublicComment(
+    token: string,
+    videoId: string,
+    commentId: string,
+    editToken: string,
+    passcode?: string,
+  ): Promise<DeletePublicFeedbackResponse> {
+    const query = new URLSearchParams({ videoId });
+
+    return requestJson<DeletePublicFeedbackResponse>(
+      `/api/public/share/${encodeURIComponent(token)}/comments/${encodeURIComponent(
+        commentId,
+      )}?${query.toString()}`,
+      {
+        headers: {
+          "X-Feedback-Edit-Token": editToken,
+          ...(passcode ? { "X-Share-Passcode": passcode } : {}),
+        },
+        method: "DELETE",
       },
     );
   },
@@ -261,6 +287,31 @@ export const portalApi = {
       {
         body: JSON.stringify({ passcode }),
         method: "POST",
+      },
+    );
+  },
+
+  updatePublicComment(
+    token: string,
+    videoId: string,
+    commentId: string,
+    input: UpdatePublicFeedbackInput,
+    editToken: string,
+    passcode?: string,
+  ): Promise<PublicFeedbackComment> {
+    const query = new URLSearchParams({ videoId });
+
+    return requestJson<PublicFeedbackComment>(
+      `/api/public/share/${encodeURIComponent(token)}/comments/${encodeURIComponent(
+        commentId,
+      )}?${query.toString()}`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "X-Feedback-Edit-Token": editToken,
+          ...(passcode ? { "X-Share-Passcode": passcode } : {}),
+        },
+        method: "PATCH",
       },
     );
   },

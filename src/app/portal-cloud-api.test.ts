@@ -896,11 +896,21 @@ describe("portal cloud API", () => {
       createRequest("/api/public/share/token_1/comments?videoId=video_1"),
       runtime,
     );
-    const createdBody = await json<Record<string, unknown>>(created);
+    const adminListed = await handlePortalApiRequest(
+      createAdminRequest("/api/admin/videos/video_1/feedback", sessionCookie),
+      runtime,
+    );
+    const createdBody = await json<{
+      comment: Record<string, unknown>;
+      editToken: string;
+    }>(created);
     const listedBody = await json<{ comments: Array<Record<string, unknown>> }>(listed);
+    const adminListedBody = await json<{ comments: Array<Record<string, unknown>> }>(
+      adminListed,
+    );
 
     expect(created.status).toBe(201);
-    expect(createdBody).toMatchObject({
+    expect(createdBody.comment).toMatchObject({
       authorName: "Mira",
       body: "Please tighten this transition.",
       positionX: 23.5,
@@ -908,11 +918,345 @@ describe("portal cloud API", () => {
       timestampSeconds: 41.25,
       videoId: "video_1",
     });
-    expect(createdBody).not.toHaveProperty("authorEmail");
-    expect(createdBody).not.toHaveProperty("adminReadAt");
+    expect(createdBody.editToken).toMatch(/^[a-f0-9]{64}$/);
+    expect(createdBody.comment).not.toHaveProperty("authorEmail");
+    expect(createdBody.comment).not.toHaveProperty("adminReadAt");
+    expect(createdBody.comment).not.toHaveProperty("editTokenHash");
     expect(listed.status).toBe(200);
     expect(listedBody.comments).toHaveLength(1);
     expect(JSON.stringify(listedBody)).not.toContain("guest@example.com");
+    expect(JSON.stringify(listedBody)).not.toContain(createdBody.editToken);
+    expect(JSON.stringify(adminListedBody)).not.toContain(createdBody.editToken);
+    expect(JSON.stringify(adminListedBody)).not.toContain("editTokenHash");
+  });
+
+  it("edits a guest top-level comment only with its browser ownership token", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const created = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments", {
+        body: JSON.stringify({
+          authorName: "Mira",
+          body: "Original feedback",
+          positionX: 23.5,
+          positionY: 67,
+          timestampSeconds: 41.25,
+          videoId: "video_1",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const createdBody = await json<{
+      comment: { id: string };
+      editToken: string;
+    }>(created);
+    const editPath =
+      `/api/public/share/token_1/comments/${createdBody.comment.id}?videoId=video_1`;
+
+    const missingToken = await handlePortalApiRequest(
+      createRequest(editPath, {
+        body: JSON.stringify({ body: "Should not save" }),
+        method: "PATCH",
+      }),
+      runtime,
+    );
+    const wrongToken = await handlePortalApiRequest(
+      createRequest(editPath, {
+        body: JSON.stringify({ body: "Should still not save" }),
+        headers: { "X-Feedback-Edit-Token": "wrong-token" },
+        method: "PATCH",
+      }),
+      runtime,
+    );
+    const invalidBody = await handlePortalApiRequest(
+      createRequest(editPath, {
+        body: JSON.stringify({ body: "   " }),
+        headers: { "X-Feedback-Edit-Token": createdBody.editToken },
+        method: "PATCH",
+      }),
+      runtime,
+    );
+    const tooLongBody = await handlePortalApiRequest(
+      createRequest(editPath, {
+        body: JSON.stringify({ body: "x".repeat(1001) }),
+        headers: { "X-Feedback-Edit-Token": createdBody.editToken },
+        method: "PATCH",
+      }),
+      runtime,
+    );
+    const edited = await handlePortalApiRequest(
+      createRequest(editPath, {
+        body: JSON.stringify({ body: "  Updated feedback  " }),
+        headers: { "X-Feedback-Edit-Token": createdBody.editToken },
+        method: "PATCH",
+      }),
+      runtime,
+    );
+    const editedBody = await json<Record<string, unknown>>(edited);
+
+    expect(missingToken.status).toBe(403);
+    expect(wrongToken.status).toBe(403);
+    expect(invalidBody.status).toBe(400);
+    expect(tooLongBody.status).toBe(400);
+    expect(edited.status).toBe(200);
+    expect(editedBody).toMatchObject({
+      authorName: "Mira",
+      body: "Updated feedback",
+      id: createdBody.comment.id,
+      positionX: 23.5,
+      positionY: 67,
+      timestampSeconds: 41.25,
+    });
+    expect(editedBody).not.toHaveProperty("editToken");
+    expect(editedBody).not.toHaveProperty("editTokenHash");
+  });
+
+  it("soft-deletes an owned parent comment and hides its complete thread and counts", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [createProject()] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1", videoId: "video_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const created = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments", {
+        body: JSON.stringify({
+          authorName: "Mira",
+          body: "Remove this thread",
+          positionX: 30,
+          positionY: 40,
+          timestampSeconds: 12,
+          videoId: "video_1",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const createdBody = await json<{
+      comment: { id: string };
+      editToken: string;
+    }>(created);
+    const reply = await handlePortalApiRequest(
+      createAdminRequest(
+        `/api/admin/feedback/${createdBody.comment.id}/replies`,
+        sessionCookie,
+        {
+          body: JSON.stringify({ body: "Reply retained for audit" }),
+          method: "POST",
+        },
+      ),
+      runtime,
+    );
+    const deleted = await handlePortalApiRequest(
+      createRequest(
+        `/api/public/share/token_1/comments/${createdBody.comment.id}?videoId=video_1`,
+        {
+          headers: { "X-Feedback-Edit-Token": createdBody.editToken },
+          method: "DELETE",
+        },
+      ),
+      runtime,
+    );
+    const publicList = await handlePortalApiRequest(
+      createRequest("/api/public/share/token_1/comments?videoId=video_1"),
+      runtime,
+    );
+    const adminList = await handlePortalApiRequest(
+      createAdminRequest("/api/admin/videos/video_1/feedback", sessionCookie),
+      runtime,
+    );
+    const summary = await handlePortalApiRequest(
+      createAdminRequest("/api/admin/feedback", sessionCookie),
+      runtime,
+    );
+    const deleteAgain = await handlePortalApiRequest(
+      createRequest(
+        `/api/public/share/token_1/comments/${createdBody.comment.id}?videoId=video_1`,
+        {
+          headers: { "X-Feedback-Edit-Token": createdBody.editToken },
+          method: "DELETE",
+        },
+      ),
+      runtime,
+    );
+
+    expect(reply.status).toBe(201);
+    expect(deleted.status).toBe(200);
+    await expect(json(deleted)).resolves.toEqual({
+      deleted: true,
+      id: createdBody.comment.id,
+    });
+    await expect(json(publicList)).resolves.toEqual({ comments: [] });
+    await expect(json(adminList)).resolves.toEqual({ comments: [] });
+    await expect(json(summary)).resolves.toEqual({ videos: [] });
+    expect(deleteAgain.status).toBe(403);
+  });
+
+  it("rejects cross-comment, cross-video, cross-share, and protected mutations", async () => {
+    const runtime = createRuntime();
+    const sessionCookie = await createAdminSessionCookie(runtime);
+    const project = createProject();
+    project.videos.push({
+      ...project.videos[0]!,
+      assetId: "asset_video_2",
+      id: "video_2",
+      orderIndex: 1,
+      title: "Second Video",
+    });
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/projects", sessionCookie, {
+        body: JSON.stringify({ data: { projects: [project] } }),
+        method: "PUT",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({ projectId: "project_1" }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    await handlePortalApiRequest(
+      createAdminRequest("/api/admin/share-links", sessionCookie, {
+        body: JSON.stringify({
+          passcode: "client-pass",
+          projectId: "project_1",
+          videoId: "video_1",
+        }),
+        method: "POST",
+      }),
+      runtime,
+    );
+    const createComment = async (
+      token: string,
+      videoId: string,
+      passcode?: string,
+    ) =>
+      json<{ comment: { id: string }; editToken: string }>(
+        await handlePortalApiRequest(
+          createRequest(`/api/public/share/${token}/comments`, {
+            body: JSON.stringify({
+              authorName: "Mira",
+              body: `Feedback for ${videoId}`,
+              positionX: 10,
+              positionY: 20,
+              timestampSeconds: 5,
+              videoId,
+            }),
+            headers: passcode ? { "X-Share-Passcode": passcode } : undefined,
+            method: "POST",
+          }),
+          runtime,
+        ),
+      );
+    const first = await createComment("token_1", "video_1");
+    const second = await createComment("token_1", "video_2");
+    const protectedComment = await createComment("token_2", "video_1", "client-pass");
+
+    const mutate = (
+      token: string,
+      videoId: string,
+      id: string,
+      editToken: string,
+      passcode?: string,
+    ) =>
+      handlePortalApiRequest(
+        createRequest(
+          `/api/public/share/${token}/comments/${id}?videoId=${videoId}`,
+          {
+            body: JSON.stringify({ body: "Scoped update" }),
+            headers: {
+              "X-Feedback-Edit-Token": editToken,
+              ...(passcode ? { "X-Share-Passcode": passcode } : {}),
+            },
+            method: "PATCH",
+          },
+        ),
+        runtime,
+      );
+
+    const crossComment = await mutate(
+      "token_1",
+      "video_1",
+      first.comment.id,
+      second.editToken,
+    );
+    const crossVideo = await mutate(
+      "token_1",
+      "video_2",
+      second.comment.id,
+      first.editToken,
+    );
+    const crossShare = await mutate(
+      "token_2",
+      "video_1",
+      first.comment.id,
+      first.editToken,
+      "client-pass",
+    );
+    const passcodeMissing = await mutate(
+      "token_2",
+      "video_1",
+      protectedComment.comment.id,
+      protectedComment.editToken,
+    );
+    const ownershipMissing = await handlePortalApiRequest(
+      createRequest(
+        `/api/public/share/token_2/comments/${protectedComment.comment.id}?videoId=video_1`,
+        {
+          body: JSON.stringify({ body: "Still blocked" }),
+          headers: { "X-Share-Passcode": "client-pass" },
+          method: "PATCH",
+        },
+      ),
+      runtime,
+    );
+    const bothCredentials = await mutate(
+      "token_2",
+      "video_1",
+      protectedComment.comment.id,
+      protectedComment.editToken,
+      "client-pass",
+    );
+
+    expect(crossComment.status).toBe(403);
+    expect(crossVideo.status).toBe(403);
+    expect(crossShare.status).toBe(403);
+    expect(passcodeMissing.status).toBe(403);
+    await expect(json(passcodeMissing)).resolves.toMatchObject({
+      error: { code: "passcode_required" },
+    });
+    expect(ownershipMissing.status).toBe(403);
+    await expect(json(ownershipMissing)).resolves.toMatchObject({
+      error: { code: "feedback_edit_forbidden" },
+    });
+    expect(bothCredentials.status).toBe(200);
   });
 
   it("validates public feedback and enforces video scope for video and project tokens", async () => {
@@ -1058,7 +1402,7 @@ describe("portal cloud API", () => {
       }),
       runtime,
     );
-    const guestBody = await json<{ id: string }>(guest);
+    const guestBody = await json<{ comment: { id: string } }>(guest);
 
     const unauthorized = await handlePortalApiRequest(
       createRequest("/api/admin/feedback"),
@@ -1073,14 +1417,14 @@ describe("portal cloud API", () => {
       runtime,
     );
     const reply = await handlePortalApiRequest(
-      createAdminRequest(`/api/admin/feedback/${guestBody.id}/replies`, sessionCookie, {
+      createAdminRequest(`/api/admin/feedback/${guestBody.comment.id}/replies`, sessionCookie, {
         body: JSON.stringify({ body: "Thanks, I will update it." }),
         method: "POST",
       }),
       runtime,
     );
     const resolved = await handlePortalApiRequest(
-      createAdminRequest(`/api/admin/feedback/${guestBody.id}`, sessionCookie, {
+      createAdminRequest(`/api/admin/feedback/${guestBody.comment.id}`, sessionCookie, {
         body: JSON.stringify({ status: "resolved" }),
         method: "PATCH",
       }),
@@ -1125,7 +1469,7 @@ describe("portal cloud API", () => {
     });
 
     const deleted = await handlePortalApiRequest(
-      createAdminRequest(`/api/admin/feedback/${guestBody.id}`, sessionCookie, {
+      createAdminRequest(`/api/admin/feedback/${guestBody.comment.id}`, sessionCookie, {
         body: JSON.stringify({ deleted: true }),
         method: "PATCH",
       }),
