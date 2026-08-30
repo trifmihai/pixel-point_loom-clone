@@ -883,8 +883,6 @@ describe("portal cloud API", () => {
           authorEmail: "guest@example.com",
           authorName: "Mira",
           body: "Please tighten this transition.",
-          positionX: 23.5,
-          positionY: 67,
           timestampSeconds: 41.25,
           videoId: "video_1",
         }),
@@ -913,11 +911,11 @@ describe("portal cloud API", () => {
     expect(createdBody.comment).toMatchObject({
       authorName: "Mira",
       body: "Please tighten this transition.",
-      positionX: 23.5,
-      positionY: 67,
       timestampSeconds: 41.25,
       videoId: "video_1",
     });
+    expect(createdBody.comment).not.toHaveProperty("positionX");
+    expect(createdBody.comment).not.toHaveProperty("positionY");
     expect(createdBody.editToken).toMatch(/^[a-f0-9]{64}$/);
     expect(createdBody.comment).not.toHaveProperty("authorEmail");
     expect(createdBody.comment).not.toHaveProperty("adminReadAt");

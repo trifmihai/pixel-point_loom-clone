@@ -5,6 +5,7 @@
 @import "tw-animate-css";
 @import "@fontsource-variable/inter";
 @import "@/toolcraft/ui/styles.css";
+@import "./app/compact-video-feedback.css";
 @import "@/toolcraft/runtime/styles.css";
 
 @theme {

@@ -13,7 +13,8 @@ describe("portal acceptance metadata", () => {
     expect(appProductReadiness.requestedBehavior).toContain("Gumlet asset IDs");
     expect(appProductReadiness.requestedBehavior).toContain("stable project and video share links");
     expect(appProductReadiness.requestedBehavior).toContain("D1-persisted timestamped visual feedback");
-    expect(appProductReadiness.requestedBehavior).toContain("toggle Watch and Review with C");
+    expect(appProductReadiness.requestedBehavior).toContain("in-player timestamp rail");
+    expect(appProductReadiness.requestedBehavior).toContain("C pause and open D1-persisted timestamped visual feedback");
     expect(appProductReadiness.requestedBehavior).toContain("edit or soft-delete");
     expect(appProductReadiness.requestedBehavior).toContain("first external playback");
     expect(appProductReadiness.requestedBehavior).toContain("Notion");
@@ -24,20 +25,22 @@ describe("portal acceptance metadata", () => {
         "share page embeds Gumlet videos",
         "share page records timestamped notes locally",
         "cloud video review places timestamped positioned feedback persisted through the public API",
-        "cloud video Watch and Review modes toggle with C and visibly distinguish Review mode",
+        "cloud video C shortcut pauses and opens timestamped feedback while optional spatial pins remain available",
         "same-browser guest comments can be edited or soft-deleted without exposing ownership secrets",
-        "direct comment links open Review mode and focus the matching timestamp",
+        "direct comment links inspect and focus the matching timestamp",
         "admin sees unread feedback badges and can reply resolve reopen copy and soft-delete",
         "public token and encoded fallback routes survive refresh",
         "first confirmed external playback creates one in-app activity event per video",
         "admin activity shows unread first views and opens the viewed video",
         "legacy encoded links keep playback without first-view tracking",
         "admin copies a stable Notion embed link for a shared video",
-        "Notion embed exposes native playback at the recommended speed without review navigation or feedback chrome",
-        "cloud Notion embed opens Leave comments in a Watch-mode page and shows exact saved time",
+        "legacy Notion embed exposes native playback at the recommended speed without cloud feedback chrome",
+        "cloud Notion embed keeps comments in a bounded player overlay with clustered timeline markers",
+        "cloud Notion embed opens full review at the current or selected timestamp and shows exact saved time",
+        "compact feedback remembers guest identity and supports owned edit and delete after reload",
         "legacy Notion embed omits the cloud comment action",
         "Notion embed chrome matches a compact Notion dark-mode content block",
-        "Notion embed hides its internal scrollbar without disabling overflow scrolling",
+        "Notion embed never grows document height at representative constrained sizes",
         "only the dedicated embed route permits third-party framing",
       ]),
     );

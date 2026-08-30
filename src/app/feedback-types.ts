@@ -41,8 +41,8 @@ export type CreatePublicFeedbackInput = {
   authorEmail?: string;
   authorName: string;
   body: string;
-  positionX: number;
-  positionY: number;
+  positionX?: number;
+  positionY?: number;
   timestampSeconds: number;
   videoId: string;
 };

@@ -12,6 +12,8 @@ import {
   Separator,
 } from "@/toolcraft/ui";
 
+import { CompactVideoFeedback } from "./compact-video-feedback";
+import { buildVideoReviewHref } from "./feedback-timeline";
 import { GumletPlayer, type GumletPlayerHandle } from "./gumlet-player";
 import { getPortalApiErrorMessage, portalApi, type PublicShareResponse } from "./portal-api";
 import { loadPortalData, savePortalData, updateVideo } from "./portal-store";
@@ -43,6 +45,7 @@ import { useFirstViewTracking } from "./first-view-tracking";
 type VideoSharePortalProps = {
   directCommentId?: string;
   encodedData?: string;
+  initialTimestampSeconds?: number;
   presentation?: "embed" | "review";
   slug: string;
 };
@@ -184,6 +187,7 @@ function getGumletPlaybackFallbackMessage(playbackSpeed: number): string {
 export function VideoSharePortal({
   directCommentId,
   encodedData,
+  initialTimestampSeconds,
   presentation = "review",
   slug,
 }: VideoSharePortalProps): React.JSX.Element {
@@ -208,7 +212,10 @@ export function VideoSharePortal({
   const [viewerSpeed, setViewerSpeed] = React.useState<PlaybackSpeed>(
     () => snapshot?.video.recommendedPlaybackSpeed ?? 1.5,
   );
-  const [reviewTimestampSeconds, setReviewTimestampSeconds] = React.useState(0);
+  const [playbackRevision, setPlaybackRevision] = React.useState(0);
+  const [reviewTimestampSeconds, setReviewTimestampSeconds] = React.useState(
+    initialTimestampSeconds ?? snapshot?.video.startTimeSeconds ?? 0,
+  );
   const gumletPlayerRef = React.useRef<GumletPlayerHandle | null>(null);
   const gumletAttemptRef = React.useRef<GumletPlaybackAttempt>({
     active: false,
@@ -219,9 +226,12 @@ export function VideoSharePortal({
   });
   const gumletFallbackTimeoutRef = React.useRef<number | null>(null);
   const nativeVideoRef = React.useRef<HTMLVideoElement | null>(null);
+  const reviewTimeCaptureRef = React.useRef<((seconds: number) => void) | null>(null);
   const video = snapshot?.video ?? null;
   const project = snapshot?.project ?? null;
   const isEmbed = presentation === "embed";
+  const requestedStartTimeSeconds = initialTimestampSeconds ?? video?.startTimeSeconds ?? 0;
+
   const recordFirstView = useFirstViewTracking({
     enabled: cloudTokenResolved,
     passcode: feedbackPasscode,
@@ -232,6 +242,7 @@ export function VideoSharePortal({
     ? {
         ...video,
         recommendedPlaybackSpeed: viewerSpeed,
+        startTimeSeconds: requestedStartTimeSeconds,
       }
     : null;
   const effectiveDurationSeconds = video?.durationSeconds ?? metadataDurationSeconds;
@@ -356,7 +367,8 @@ export function VideoSharePortal({
     setGumletPlaybackStatus("");
     setMetadataDurationSeconds(undefined);
     setDurationDetectionTimedOut(false);
-    setReviewTimestampSeconds(video?.startTimeSeconds ?? 0);
+    setReviewTimestampSeconds(requestedStartTimeSeconds);
+    reviewTimeCaptureRef.current = null;
     gumletAttemptRef.current = {
       active: false,
       playbackStarted: false,
@@ -366,7 +378,7 @@ export function VideoSharePortal({
     };
     clearGumletFallbackTimer();
     setViewerSpeed(video?.recommendedPlaybackSpeed ?? 1.5);
-  }, [clearGumletFallbackTimer, video?.assetId, video?.directVideoUrl, video?.id]);
+  }, [clearGumletFallbackTimer, requestedStartTimeSeconds, video?.assetId, video?.directVideoUrl, video?.id]);
 
   React.useEffect(() => {
     if (!video || effectiveDurationSeconds) {
@@ -401,14 +413,14 @@ export function VideoSharePortal({
       player.volume = 1;
     }
 
-    if (video.startTimeSeconds && player.currentTime < video.startTimeSeconds) {
+    if (requestedStartTimeSeconds > 0 && player.currentTime < requestedStartTimeSeconds) {
       try {
-        player.currentTime = video.startTimeSeconds;
+        player.currentTime = requestedStartTimeSeconds;
       } catch {
         // Some browsers reject seeking before metadata is ready; loadedmetadata retries this.
       }
     }
-  }, [video, viewerSpeed]);
+  }, [requestedStartTimeSeconds, video, viewerSpeed]);
 
   React.useEffect(() => {
     applyNativePlaybackSettings();
@@ -436,18 +448,29 @@ export function VideoSharePortal({
     }
 
     gumletPlayerRef.current?.pause();
-    gumletPlayerRef.current?.requestCurrentTime();
   }
 
-  function handleReviewRequestCurrentTime(): void {
+  function handleReviewRequestCurrentTime(
+    onCaptured?: (seconds: number) => void,
+  ): void {
     const nativePlayer = nativeVideoRef.current;
 
     if (nativePlayer) {
-      setReviewTimestampSeconds(nativePlayer.currentTime);
+      const currentTimeSeconds = nativePlayer.currentTime;
+      setReviewTimestampSeconds(currentTimeSeconds);
+      onCaptured?.(currentTimeSeconds);
       return;
     }
 
+    reviewTimeCaptureRef.current = onCaptured ?? null;
     gumletPlayerRef.current?.requestCurrentTime();
+  }
+
+  function handleGumletCurrentTime(currentTimeSeconds: number): void {
+    setReviewTimestampSeconds(currentTimeSeconds);
+    const onCaptured = reviewTimeCaptureRef.current;
+    reviewTimeCaptureRef.current = null;
+    onCaptured?.(currentTimeSeconds);
   }
 
   function handleReviewSeek(seconds: number): void {
@@ -477,6 +500,7 @@ export function VideoSharePortal({
 
     if (message.playbackStarted) {
       recordFirstView();
+      setPlaybackRevision((current) => current + 1);
 
       if (isEmbed) {
         setStarted(true);
@@ -667,6 +691,7 @@ export function VideoSharePortal({
       onPlay={() => {
         applyNativePlaybackSettings({ audible: true });
         recordFirstView();
+        setPlaybackRevision((current) => current + 1);
       }}
       onTimeUpdate={(event) => setReviewTimestampSeconds(event.currentTarget.currentTime)}
       poster={video.thumbnailUrl}
@@ -678,7 +703,7 @@ export function VideoSharePortal({
   ) : playbackVideo ? (
     <GumletPlayer
       ref={gumletPlayerRef}
-      onCurrentTime={setReviewTimestampSeconds}
+      onCurrentTime={handleGumletCurrentTime}
       onDuration={handleResolvedDuration}
       onPlaybackEvent={handleGumletPlaybackEvent}
       video={playbackVideo}
@@ -699,63 +724,68 @@ export function VideoSharePortal({
             </div>
           </header>
 
-          <div className="relative bg-black">
-            <section
-              className="min-w-0 overflow-hidden bg-black"
-              data-testid="video-player-frame"
+          <div className="notion-video-embed__player-slot">
+            <CompactVideoFeedback
+              currentTimeSeconds={reviewTimestampSeconds}
+              durationSeconds={effectiveDurationSeconds}
+              enabled={cloudTokenResolved}
+              onCommentingChange={(commenting) => {
+                if (commenting) {
+                  setStarted(true);
+                }
+              }}
+              onPause={handleReviewPause}
+              onPlaybackRevision={playbackRevision}
+              onRequestCurrentTime={handleReviewRequestCurrentTime}
+              onSeek={handleReviewSeek}
+              passcode={feedbackPasscode}
+              reviewHref={reviewHref}
+              token={slug}
+              videoId={video.id}
             >
-              {videoPlayer}
-            </section>
-
-            {!started && video.directVideoUrl ? (
-              <div
-                className="absolute inset-0 flex items-center justify-center bg-black/55 p-3"
-                data-testid="review-start-panel"
+              <section
+                className="notion-video-embed__player-frame min-w-0 overflow-hidden bg-black"
+                data-testid="video-player-frame"
               >
-                <div className="notion-video-embed__start-card sm:p-4">
-                  <div className="flex flex-col items-center gap-2.5">
-                    <Badge className="notion-video-embed__speed-badge gap-2" variant="secondary">
-                      <Gauge aria-hidden="true" className="size-4" />
-                      Recommended {viewerSpeed}x
-                    </Badge>
-                    <div className="space-y-1 text-xs text-[color:var(--muted-foreground)] sm:text-sm">
-                      {watchTimeLabel ? (
-                        <span className="flex items-center justify-center gap-2">
-                          <Clock3 aria-hidden="true" className="size-4" />
-                          {watchTimeLabel}
-                        </span>
-                      ) : null}
-                      {savedTimeLabel ? <span className="block">{savedTimeLabel}</span> : null}
-                      {!playbackSavings && durationDetectionTimedOut ? (
-                        <span className="block">{durationFallbackMessage}</span>
-                      ) : null}
+                {videoPlayer}
+              </section>
+
+              {!started && video.directVideoUrl ? (
+                <div
+                  className="absolute inset-0 flex items-center justify-center bg-black/55 p-3"
+                  data-testid="review-start-panel"
+                >
+                  <div className="notion-video-embed__start-card sm:p-4">
+                    <div className="flex flex-col items-center gap-2.5">
+                      <Badge className="notion-video-embed__speed-badge gap-2" variant="secondary">
+                        <Gauge aria-hidden="true" className="size-4" />
+                        Recommended {viewerSpeed}x
+                      </Badge>
+                      <div className="space-y-1 text-xs text-[color:var(--muted-foreground)] sm:text-sm">
+                        {watchTimeLabel ? <span className="flex items-center justify-center gap-2"><Clock3 aria-hidden="true" className="size-4" />{watchTimeLabel}</span> : null}
+                        {savedTimeLabel ? <span className="block">{savedTimeLabel}</span> : null}
+                        {!playbackSavings && durationDetectionTimedOut ? <span className="block">{durationFallbackMessage}</span> : null}
+                      </div>
+                      <Button className="notion-video-embed__start-button min-h-10 w-full" onClick={handleStart} size="lg" type="button">
+                        <Play />
+                        <span>{gumletStartPending ? "Starting" : "Start"} {viewerSpeed}x review</span>
+                      </Button>
                     </div>
-                    <Button
-                      className="notion-video-embed__start-button min-h-10 w-full"
-                      onClick={handleStart}
-                      size="lg"
-                      type="button"
-                    >
-                      <Play />
-                      <span>
-                        {gumletStartPending ? "Starting" : "Start"} {viewerSpeed}x review
-                      </span>
-                    </Button>
                   </div>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+            </CompactVideoFeedback>
           </div>
 
           <footer className="notion-video-embed__footer">
             {cloudTokenResolved ? (
               <a
                 className="notion-video-embed__comments-link"
-                href={reviewHref}
+                href={buildVideoReviewHref(reviewHref, reviewTimestampSeconds)}
                 rel="noreferrer"
                 target="_blank"
               >
-                Leave comments
+                Open full review
               </a>
             ) : null}
             <div className="notion-video-embed__status">
@@ -827,12 +857,13 @@ export function VideoSharePortal({
           currentTimeSeconds={reviewTimestampSeconds}
           directCommentId={directCommentId}
           enabled={cloudTokenResolved}
-          onModeChange={(mode) => {
-            if (mode === "review") {
+          onCommentingChange={(commenting) => {
+            if (commenting) {
               setStarted(true);
             }
           }}
           onPause={handleReviewPause}
+          playbackRevision={playbackRevision}
           onRequestCurrentTime={handleReviewRequestCurrentTime}
           onSeek={handleReviewSeek}
           passcode={feedbackPasscode}

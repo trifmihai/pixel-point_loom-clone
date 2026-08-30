@@ -44,15 +44,15 @@ import {
   saveFeedbackEditToken,
 } from "./feedback-ownership";
 import { calculateVideoPositionPercent, validatePublicFeedbackInput } from "./feedback-utils";
+import { shouldHandleFeedbackShortcut } from "./feedback-timeline";
 import { getPortalApiErrorMessage, portalApi, PortalApiError } from "./portal-api";
 import { formatDuration } from "./portal-utils";
 
-type ReviewMode = "review" | "watch";
 type ReviewFilter = "all" | "open" | "resolved";
 
 type DraftPlacement = {
-  positionX: number;
-  positionY: number;
+  positionX?: number;
+  positionY?: number;
   timestampSeconds: number;
 };
 
@@ -61,9 +61,10 @@ type VideoFeedbackReviewProps = {
   currentTimeSeconds: number;
   directCommentId?: string;
   enabled: boolean;
-  onModeChange?: (mode: ReviewMode) => void;
+  onCommentingChange?: (commenting: boolean) => void;
   onPause: () => void;
-  onRequestCurrentTime: () => void;
+  playbackRevision?: number;
+  onRequestCurrentTime: (onCaptured?: (seconds: number) => void) => void;
   onSeek: (seconds: number) => void;
   passcode?: string;
   token: string;
@@ -129,15 +130,15 @@ export function VideoFeedbackReview({
   currentTimeSeconds,
   directCommentId,
   enabled,
-  onModeChange,
+  onCommentingChange,
   onPause,
+  playbackRevision = 0,
   onRequestCurrentTime,
   onSeek,
   passcode,
   token,
   videoId,
 }: VideoFeedbackReviewProps): React.JSX.Element {
-  const [mode, setMode] = React.useState<ReviewMode>(directCommentId ? "review" : "watch");
   const [filter, setFilter] = React.useState<ReviewFilter>("open");
   const [comments, setComments] = React.useState<PublicFeedbackComment[]>([]);
   const [commentsLoading, setCommentsLoading] = React.useState(enabled);
@@ -148,9 +149,13 @@ export function VideoFeedbackReview({
   const [placement, setPlacement] = React.useState<DraftPlacement | null>(null);
   const [identity, setIdentity] = React.useState<GuestFeedbackIdentity>(loadGuestIdentity);
   const [body, setBody] = React.useState("");
+  const [editingIdentity, setEditingIdentity] = React.useState(false);
+  const [emailExpanded, setEmailExpanded] = React.useState(false);
   const [submitError, setSubmitError] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [editingCommentId, setEditingCommentId] = React.useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = React.useState(false);
+  const [liveMessage, setLiveMessage] = React.useState("Watching");
   const [editBody, setEditBody] = React.useState("");
   const [deleteTarget, setDeleteTarget] = React.useState<PublicFeedbackComment | null>(null);
   const [mutatingCommentId, setMutatingCommentId] = React.useState<string | null>(null);
@@ -160,6 +165,13 @@ export function VideoFeedbackReview({
   } | null>(null);
   const commentRefs = React.useRef(new Map<string, HTMLElement>());
   const directHandledRef = React.useRef<string | null>(null);
+  const dialogRef = React.useRef<HTMLDivElement | null>(null);
+  const nameRef = React.useRef<HTMLInputElement | null>(null);
+  const bodyRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const previousPlaybackRevisionRef = React.useRef(playbackRevision);
+  const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  const pendingFocusCommentIdRef = React.useRef<string | null>(null);
+  const composerSessionRef = React.useRef(0);
   const threads = React.useMemo(() => getThreads(comments), [comments]);
   const filteredThreads = threads.filter(
     ({ comment }) => filter === "all" || comment.status === filter,
@@ -187,50 +199,72 @@ export function VideoFeedbackReview({
     void loadComments();
   }, [loadComments]);
 
-  React.useEffect(() => {
-    if (!enabled) {
-      return;
+  React.useLayoutEffect(() => {
+    if (!enabled || discardOpen || deleteTarget) {
+      return undefined;
     }
 
-    function handleModeShortcut(event: KeyboardEvent): void {
+    function handleShortcut(event: KeyboardEvent): void {
+
+      const editable =
+        event.target instanceof Element &&
+        Boolean(
+          event.target.closest(
+            'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+          ),
+        );
+
       if (
-        event.key.toLowerCase() !== "c" ||
-        event.repeat ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.metaKey
+        shouldHandleFeedbackShortcut({
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          editable,
+          key: event.key,
+          metaKey: event.metaKey,
+          repeat: event.repeat,
+        })
       ) {
+        event.preventDefault();
+        openComposer();
         return;
       }
 
-      const target = event.target;
-
-      if (
-        target instanceof Element &&
-        target.closest(
-          'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
-        )
-      ) {
-        return;
+      if (event.key === "Escape" && placement && !deleteTarget && !discardOpen) {
+        event.preventDefault();
+        requestCloseComposer();
       }
-
-      event.preventDefault();
-      changeMode(mode === "watch" ? "review" : "watch");
     }
 
-    document.addEventListener("keydown", handleModeShortcut);
-    return () => document.removeEventListener("keydown", handleModeShortcut);
-  }, [enabled, mode, onModeChange, onPause, onRequestCurrentTime]);
+    document.addEventListener("keydown", handleShortcut);
+    return () => document.removeEventListener("keydown", handleShortcut);
+  });
+
 
   React.useEffect(() => {
-    if (!placement || !Number.isFinite(currentTimeSeconds)) {
+    const pendingId = pendingFocusCommentIdRef.current;
+    if (placement || !pendingId || selectedCommentId !== pendingId) {
       return;
     }
 
-    setPlacement((current) =>
-      current ? { ...current, timestampSeconds: Math.max(0, currentTimeSeconds) } : current,
-    );
-  }, [currentTimeSeconds, placement?.positionX, placement?.positionY]);
+    const target = commentRefs.current.get(pendingId);
+    if (!target) {
+      return;
+    }
+
+    pendingFocusCommentIdRef.current = null;
+    target.focus({ preventScroll: true });
+  }, [comments, filter, placement, selectedCommentId]);
+
+  React.useEffect(() => {
+    if (previousPlaybackRevisionRef.current === playbackRevision) {
+      return;
+    }
+    previousPlaybackRevisionRef.current = playbackRevision;
+    if (!placement) {
+      setSelectedCommentId(null);
+      setLiveMessage("Watching");
+    }
+  }, [placement, playbackRevision]);
 
   React.useEffect(() => {
     if (!directCommentId || directHandledRef.current === directCommentId || commentsLoading) {
@@ -250,10 +284,8 @@ export function VideoFeedbackReview({
       : directComment;
 
     directHandledRef.current = directCommentId;
-    setMode("review");
     setFilter("all");
     setSelectedCommentId(parent.id);
-    onModeChange?.("review");
     onPause();
     onSeek(parent.timestampSeconds);
 
@@ -261,39 +293,107 @@ export function VideoFeedbackReview({
       commentRefs.current.get(parent.id)?.focus();
       commentRefs.current.get(parent.id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 0);
-  }, [comments, commentsLoading, directCommentId, onModeChange, onPause, onSeek]);
+  }, [comments, commentsLoading, directCommentId, onPause, onSeek]);
 
-  function changeMode(nextMode: ReviewMode): void {
-    setMode(nextMode);
-    setPlacement(null);
+  function openComposer(): void {
+    if (placement) {
+      (identity.name.trim() ? bodyRef.current : nameRef.current)?.focus({ preventScroll: true });
+      return;
+    }
+
+    returnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const session = ++composerSessionRef.current;
+    onPause();
+    setSelectedCommentId(null);
+    setPlacement({ timestampSeconds: Math.max(0, currentTimeSeconds) });
+    onRequestCurrentTime((timestampSeconds) => {
+      if (composerSessionRef.current !== session) {
+        return;
+      }
+      setPlacement((current) =>
+        current
+          ? { ...current, timestampSeconds: Math.max(0, timestampSeconds) }
+          : current,
+      );
+    });
     setSubmitError("");
-    onModeChange?.(nextMode);
+    setLiveMessage(`Commenting at ${formatDuration(Math.max(0, currentTimeSeconds))}`);
+    onCommentingChange?.(true);
+    window.setTimeout(
+      () => (identity.name.trim() ? bodyRef.current : nameRef.current)?.focus({ preventScroll: true }),
+      0,
+    );
+  }
 
-    if (nextMode === "review") {
-      onPause();
-      onRequestCurrentTime();
+  function closeComposer(): void {
+    composerSessionRef.current += 1;
+    setPlacement(null);
+    setBody("");
+    setSubmitError("");
+    setDiscardOpen(false);
+    setEditingIdentity(false);
+    setEmailExpanded(false);
+    setLiveMessage("Watching");
+    onCommentingChange?.(false);
+    window.setTimeout(() => returnFocusRef.current?.focus({ preventScroll: true }), 0);
+  }
+
+  function requestCloseComposer(): void {
+    if (body.trim()) {
+      setDiscardOpen(true);
+    } else {
+      closeComposer();
     }
   }
 
+
+  function trapDialogFocus(event: React.KeyboardEvent<HTMLDivElement>): void {
+    if (event.key !== "Tab") {
+      return;
+    }
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled])',
+      ) ?? [],
+    );
+    if (focusable.length === 0) {
+      return;
+    }
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
   function handlePlacement(event: React.MouseEvent<HTMLButtonElement>): void {
     const bounds = event.currentTarget.getBoundingClientRect();
     const position = calculateVideoPositionPercent(event, bounds);
 
     onPause();
-    onRequestCurrentTime();
-    setPlacement({
+    setPlacement((current) => ({
       positionX: Math.round(position.x * 100) / 100,
       positionY: Math.round(position.y * 100) / 100,
-      timestampSeconds: Math.max(0, currentTimeSeconds),
-    });
+      timestampSeconds: current?.timestampSeconds ?? Math.max(0, currentTimeSeconds),
+    }));
     setSubmitError("");
   }
 
   function selectComment(comment: PublicFeedbackComment): void {
+    if (placement) {
+      return;
+    }
+
     setSelectedCommentId(comment.id);
-    setPlacement(null);
+    onCommentingChange?.(false);
     onPause();
     onSeek(comment.timestampSeconds);
+    setLiveMessage(`Reviewing comment at ${formatDuration(comment.timestampSeconds)}`);
     commentRefs.current.get(comment.id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
@@ -308,8 +408,12 @@ export function VideoFeedbackReview({
       ...(identity.email.trim() ? { authorEmail: identity.email.trim() } : {}),
       authorName: identity.name,
       body,
-      positionX: placement.positionX,
-      positionY: placement.positionY,
+      ...(placement.positionX !== undefined && placement.positionY !== undefined
+        ? {
+            positionX: placement.positionX,
+            positionY: placement.positionY,
+          }
+        : {}),
       timestampSeconds: placement.timestampSeconds,
       videoId,
     };
@@ -331,6 +435,8 @@ export function VideoFeedbackReview({
         created.comment.id,
         created.editToken,
       );
+      pendingFocusCommentIdRef.current = created.comment.id;
+      setFilter("open");
       setComments((current) => [...current, created.comment]);
       setSelectedCommentId(created.comment.id);
       saveGuestIdentity({ email: identity.email.trim(), name: identity.name.trim() });
@@ -339,7 +445,12 @@ export function VideoFeedbackReview({
         name: current.name.trim(),
       }));
       setBody("");
+      composerSessionRef.current += 1;
       setPlacement(null);
+      setEditingIdentity(false);
+      setEmailExpanded(false);
+      onCommentingChange?.(false);
+      setLiveMessage(`Comment saved at ${formatDuration(created.comment.timestampSeconds)}`);
     } catch (error) {
       setSubmitError(
         error instanceof PortalApiError
@@ -464,60 +575,50 @@ export function VideoFeedbackReview({
       id="video-player"
     >
       <p aria-live="polite" className="sr-only">
-        {mode === "review" ? "Review mode active" : "Watch mode active"}
+        {liveMessage}
       </p>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-medium text-white">
-            {mode === "review" ? "Review mode" : "Watch mode"}
+            {placement
+              ? `Commenting at ${formatDuration(placement.timestampSeconds)}`
+              : selectedCommentId
+                ? "Inspecting feedback"
+                : "Watching"}
           </p>
           <p className="text-xs text-[color:var(--muted-foreground)]">
-            {mode === "review"
-              ? "Click the video to leave feedback. Press C to switch to Watch."
-              : "Watch without comment controls. Press C to switch to Review."}
+            {placement
+              ? "Add an optional pin by clicking the video, then write your comment."
+              : "Press C or use Comment to leave timestamped feedback."}
           </p>
         </div>
-        <div
-          aria-label="Viewing mode"
-          className="grid min-h-11 grid-cols-2 rounded-lg border border-[color:var(--portal-border)] bg-black/20 p-1 sm:w-56"
-          role="group"
+        <Button
+          aria-label="Comment at current time"
+          className="min-h-11 sm:min-w-40"
+          onClick={openComposer}
+          size="sm"
+          type="button"
+          variant="secondary"
         >
-          <Button
-            aria-pressed={mode === "watch"}
-            className="min-h-9"
-            onClick={() => changeMode("watch")}
-            size="sm"
-            type="button"
-            variant={mode === "watch" ? "secondary" : "ghost"}
-          >
-            Watch
-          </Button>
-          <Button
-            aria-pressed={mode === "review"}
-            className="min-h-9"
-            onClick={() => changeMode("review")}
-            size="sm"
-            type="button"
-            variant={mode === "review" ? "secondary" : "ghost"}
-          >
-            Review
-          </Button>
-        </div>
+          <MessageSquarePlus aria-hidden="true" />
+          Comment <kbd className="rounded border border-white/20 px-1 text-[0.65rem]">C</kbd>
+        </Button>
       </div>
 
       <div
         className={`relative rounded-xl transition-[box-shadow] duration-200 ${
-          mode === "review"
+          placement || selectedCommentId
             ? "shadow-[0_0_0_2px_rgba(125,211,252,0.45),0_0_28px_rgba(56,189,248,0.14)]"
             : ""
         }`}
-        data-mode={mode}
+        data-commenting={Boolean(placement)}
+        data-inspecting={Boolean(selectedCommentId)}
         data-testid="video-review-frame"
       >
         {children}
 
-        {mode === "review" ? (
           <>
+            {placement ? (
             <Button
               aria-label="Place feedback on video"
               className="absolute inset-0 z-30 !h-auto w-full cursor-crosshair rounded-xl bg-sky-400/[0.025] p-0 hover:bg-sky-400/[0.05]"
@@ -525,6 +626,7 @@ export function VideoFeedbackReview({
               type="button"
               variant="ghost-static"
             />
+            ) : null}
 
             {threads.map(({ comment }, index) =>
               comment.positionX !== undefined && comment.positionY !== undefined ? (
@@ -535,6 +637,7 @@ export function VideoFeedbackReview({
                       ? "border-white bg-sky-500 text-white"
                       : "border-sky-200/60 bg-sky-500/85 text-white"
                   }`}
+                  disabled={Boolean(placement)}
                   key={comment.id}
                   onClick={() => selectComment(comment)}
                   style={{ left: `${comment.positionX}%`, top: `${comment.positionY}%` }}
@@ -548,13 +651,11 @@ export function VideoFeedbackReview({
 
             {placement ? (
               <Card
-                className="fixed inset-x-3 bottom-3 top-auto z-[70] max-h-[calc(100dvh-1.5rem)] overflow-y-auto border-sky-300/40 shadow-2xl sm:absolute sm:bottom-auto sm:left-[var(--feedback-left)] sm:right-auto sm:top-[var(--feedback-top)] sm:w-[min(22rem,calc(100%-1.5rem))]"
-                style={
-                  {
-                    "--feedback-left": `clamp(0.75rem, ${placement.positionX}%, calc(100% - 22.75rem))`,
-                    "--feedback-top": `clamp(0.75rem, ${placement.positionY}%, calc(100% - 25rem))`,
-                  } as React.CSSProperties
-                }
+                aria-label={`Add comment at ${formatDuration(placement.timestampSeconds)}`}
+                className="fixed inset-x-3 bottom-3 top-auto z-[45] max-h-[calc(100dvh-1.5rem)] overflow-y-auto border-sky-300/40 shadow-2xl sm:absolute sm:bottom-3 sm:left-auto sm:right-3 sm:w-[min(22rem,calc(100%-1.5rem))]"
+                onKeyDown={trapDialogFocus}
+                ref={dialogRef}
+                role="dialog"
               >
                 <CardHeader className="gap-3 pr-14">
                   <div>
@@ -563,13 +664,13 @@ export function VideoFeedbackReview({
                       Add feedback
                     </CardTitle>
                     <CardDescription>
-                      At {formatDuration(placement.timestampSeconds)} on this point.
+                      Commenting at {formatDuration(placement.timestampSeconds)}. Click the video to add an optional pin.
                     </CardDescription>
                   </div>
                   <Button
                     aria-label="Cancel feedback"
                     className="absolute right-3 top-3"
-                    onClick={() => setPlacement(null)}
+                    onClick={requestCloseComposer}
                     size="icon"
                     type="button"
                     variant="ghost"
@@ -580,34 +681,63 @@ export function VideoFeedbackReview({
                 <CardContent>
                   <form onSubmit={(event) => void handleSubmit(event)}>
                     <FieldGroup>
-                      <Field>
-                        <FieldLabel htmlFor="feedback-author-name">Name</FieldLabel>
-                        <Input
-                          autoComplete="name"
-                          id="feedback-author-name"
-                          maxLength={80}
-                          onChange={(event) =>
-                            setIdentity((current) => ({ ...current, name: event.target.value }))
-                          }
-                          required
-                          size="lg"
-                          value={identity.name}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="feedback-author-email">Email (optional)</FieldLabel>
-                        <Input
-                          autoComplete="email"
-                          id="feedback-author-email"
-                          maxLength={254}
-                          onChange={(event) =>
-                            setIdentity((current) => ({ ...current, email: event.target.value }))
-                          }
-                          size="lg"
-                          type="email"
-                          value={identity.email}
-                        />
-                      </Field>
+                      {identity.name.trim() && !editingIdentity ? (
+                        <div className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                          <span className="truncate text-sm text-white/85">
+                            Commenting as {identity.name.trim()}
+                          </span>
+                          <Button
+                            onClick={() => setEditingIdentity(true)}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            Change name
+                          </Button>
+                        </div>
+                      ) : (
+                        <Field>
+                          <FieldLabel htmlFor="feedback-author-name">Name</FieldLabel>
+                          <Input
+                            autoComplete="name"
+                            id="feedback-author-name"
+                            maxLength={80}
+                            onChange={(event) =>
+                              setIdentity((current) => ({ ...current, name: event.target.value }))
+                            }
+                            ref={nameRef}
+                            required
+                            size="lg"
+                            value={identity.name}
+                          />
+                        </Field>
+                      )}
+                      <Button
+                        aria-expanded={emailExpanded}
+                        className="justify-start"
+                        onClick={() => setEmailExpanded((current) => !current)}
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        {identity.email.trim() ? "Edit email (optional)" : "Add email (optional)"}
+                      </Button>
+                      {emailExpanded ? (
+                        <Field>
+                          <FieldLabel htmlFor="feedback-author-email">Email (optional)</FieldLabel>
+                          <Input
+                            autoComplete="email"
+                            id="feedback-author-email"
+                            maxLength={254}
+                            onChange={(event) =>
+                              setIdentity((current) => ({ ...current, email: event.target.value }))
+                            }
+                            size="lg"
+                            type="email"
+                            value={identity.email}
+                          />
+                        </Field>
+                      ) : null}
                       <Field>
                         <FieldLabel htmlFor="feedback-body">Comment</FieldLabel>
                         <Textarea
@@ -615,6 +745,7 @@ export function VideoFeedbackReview({
                           maxLength={1000}
                           onChange={(event) => setBody(event.target.value)}
                           placeholder="What should change here?"
+                          ref={bodyRef}
                           required
                           rows={4}
                           value={body}
@@ -630,7 +761,7 @@ export function VideoFeedbackReview({
                       <Button
                         className="min-h-11"
                         disabled={submitting}
-                        onClick={() => setPlacement(null)}
+                        onClick={requestCloseComposer}
                         type="button"
                         variant="outline"
                       >
@@ -645,10 +776,8 @@ export function VideoFeedbackReview({
               </Card>
             ) : null}
           </>
-        ) : null}
       </div>
 
-      {mode === "review" ? (
         <Card className="border-[color:var(--portal-border)]" data-testid="public-feedback-panel">
           <CardHeader className="gap-4 md:grid-cols-[1fr_auto]">
             <div>
@@ -720,6 +849,7 @@ export function VideoFeedbackReview({
                     </div>
                     <Button
                       className="min-h-10"
+                      disabled={Boolean(placement)}
                       onClick={() => selectComment(comment)}
                       size="sm"
                       type="button"
@@ -844,7 +974,28 @@ export function VideoFeedbackReview({
             </p>
           </CardContent>
         </Card>
-      ) : null}
+
+      <AlertDialog onOpenChange={setDiscardOpen} open={discardOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard this comment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your comment has not been saved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              Keep editing
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={closeComposer}
+              variant="destructive"
+            >
+              Discard draft
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         onOpenChange={(open) => {

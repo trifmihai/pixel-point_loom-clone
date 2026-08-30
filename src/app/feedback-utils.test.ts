@@ -83,6 +83,36 @@ describe("feedback utilities", () => {
     ]);
   });
 
+  it("accepts timestamp-only feedback while rejecting partial spatial positions", () => {
+    expect(
+      validatePublicFeedbackInput({
+        authorName: "Mira",
+        body: "Tighten this transition.",
+        timestampSeconds: 42.25,
+        videoId: "video_1",
+      }),
+    ).toEqual({
+      input: {
+        authorName: "Mira",
+        body: "Tighten this transition.",
+        timestampSeconds: 42.25,
+        videoId: "video_1",
+      },
+      issues: [],
+    });
+
+    const partialPosition = validatePublicFeedbackInput({
+      authorName: "Mira",
+      body: "Tighten this transition.",
+      positionX: 32.5,
+      timestampSeconds: 42.25,
+      videoId: "video_1",
+    });
+
+    expect(partialPosition.input).toBeNull();
+    expect(partialPosition.issues.map((issue) => issue.field)).toEqual(["positionY"]);
+  });
+
   it("maps nullable D1 feedback rows without leaking snake_case", () => {
     expect(
       mapFeedbackCommentRow({

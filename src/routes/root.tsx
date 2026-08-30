@@ -1,4 +1,5 @@
 import { Outlet, createRootRoute, createRoute } from "@tanstack/react-router";
+import { parseVideoReviewTimestamp } from "../app/feedback-timeline";
 
 import { SharePortal } from "../app/share-portal";
 import { VideoEmbedPortal } from "../app/video-embed-portal";
@@ -42,6 +43,7 @@ const videoRoute = createRoute({
   validateSearch: (search: Record<string, unknown>) => ({
     comment: typeof search.comment === "string" && search.comment.trim() ? search.comment : undefined,
     data: typeof search.data === "string" ? search.data : undefined,
+    t: parseVideoReviewTimestamp(search.t),
   }),
 });
 
@@ -63,9 +65,9 @@ function ShareRoute(): React.JSX.Element {
 
 function VideoRoute(): React.JSX.Element {
   const { slug } = videoRoute.useParams();
-  const { comment, data } = videoRoute.useSearch();
+  const { comment, data, t } = videoRoute.useSearch();
 
-  return <VideoSharePortal directCommentId={comment} encodedData={data} slug={slug} />;
+  return <VideoSharePortal directCommentId={comment} encodedData={data} initialTimestampSeconds={t} slug={slug} />;
 }
 
 function VideoEmbedRoute(): React.JSX.Element {

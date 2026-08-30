@@ -83,6 +83,8 @@ export function validatePublicFeedbackInput(value: unknown): {
   const authorEmail =
     typeof candidate.authorEmail === "string" ? candidate.authorEmail.trim() : "";
   const body = typeof candidate.body === "string" ? candidate.body.trim() : "";
+  const hasPositionX = candidate.positionX !== undefined;
+  const hasPositionY = candidate.positionY !== undefined;
   const issues: FeedbackValidationIssue[] = [];
 
   if (!videoId) {
@@ -101,16 +103,20 @@ export function validatePublicFeedbackInput(value: unknown): {
     issues.push({ field: "timestampSeconds", message: "Timestamp must be zero or greater." });
   }
   if (
-    !isFiniteNumber(candidate.positionX) ||
-    candidate.positionX < 0 ||
-    candidate.positionX > 100
+    (hasPositionY && !hasPositionX) ||
+    (hasPositionX &&
+      (!isFiniteNumber(candidate.positionX) ||
+        candidate.positionX < 0 ||
+        candidate.positionX > 100))
   ) {
     issues.push({ field: "positionX", message: "Horizontal position must be from 0 to 100." });
   }
   if (
-    !isFiniteNumber(candidate.positionY) ||
-    candidate.positionY < 0 ||
-    candidate.positionY > 100
+    (hasPositionX && !hasPositionY) ||
+    (hasPositionY &&
+      (!isFiniteNumber(candidate.positionY) ||
+        candidate.positionY < 0 ||
+        candidate.positionY > 100))
   ) {
     issues.push({ field: "positionY", message: "Vertical position must be from 0 to 100." });
   }
@@ -124,8 +130,9 @@ export function validatePublicFeedbackInput(value: unknown): {
       ...(authorEmail ? { authorEmail } : {}),
       authorName,
       body,
-      positionX: candidate.positionX!,
-      positionY: candidate.positionY!,
+      ...(hasPositionX && hasPositionY
+        ? { positionX: candidate.positionX!, positionY: candidate.positionY! }
+        : {}),
       timestampSeconds: candidate.timestampSeconds!,
       videoId,
     },
