@@ -731,7 +731,7 @@ test("browser: passcode-protected review and embed routes block details until un
   await expect(page.getByTestId("notion-video-embed")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Homepage walkthrough" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open full review" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Comment at current time" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Comment at / })).toBeVisible();
   await expect(page.getByRole("group", { name: "Video comments" })).toBeVisible();
 });
 
@@ -802,7 +802,7 @@ test("browser: Notion embed plays the shared video in place at the recommended s
   await expect(page.getByRole("link", { name: "Open full review" })).toHaveCount(0);
   await expect(page.getByText("Recommended 1.5x", { exact: true })).toBeVisible();
   await expect(page.getByText("Watch in about 8:00", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Comment at current time" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Comment at / })).toHaveCount(0);
   await expect(page.getByRole("group", { name: "Video comments" })).toHaveCount(0);
   await expect(page.getByText("Save about 4:00", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Playback speed")).toHaveCount(0);
@@ -945,8 +945,8 @@ test("browser: compact Notion embed comments stay inside the player and preserve
   await page.goto("/embed/video/compact_feedback_token");
 
   const review = page.getByRole("region", { name: "Video feedback review" });
-  await expect(review).toHaveAttribute("aria-keyshortcuts", "C");
-  await expect(page.getByRole("button", { name: "Comment at current time" })).toBeVisible();
+  await expect(review).not.toHaveAttribute("aria-keyshortcuts");
+  await expect(page.getByRole("button", { name: "Comment at this time" })).toBeVisible();
   await expect(page.getByRole("group", { name: "Video comments" })).toHaveCount(0);
   await page.evaluate(() => {
     const trackedWindow = window as Window & {
@@ -970,9 +970,11 @@ test("browser: compact Notion embed comments stay inside the player and preserve
   await page.locator("video").dispatchEvent("play");
   await expect(page.getByTestId("feedback-comment-card")).toHaveCount(0);
   await page.keyboard.press("c");
-  const composer = page.getByRole("dialog", { name: "Add comment at 1:00" });
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "Comment at 1:00", exact: true }).click();
+  const composer = page.getByRole("dialog", { name: "Comment at 1:00" });
   await expect(composer).toBeVisible();
-  await expect(composer.getByText("Commenting at 1:00", { exact: true })).toBeVisible();
+  await expect(composer.getByText("Comment at 1:00", { exact: true })).toBeVisible();
   await expect(page.getByText("Commenting as Mira", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Name")).toHaveCount(0);
   await expect(page.getByLabel("Email (optional)")).toHaveCount(0);
@@ -983,7 +985,7 @@ test("browser: compact Notion embed comments stay inside the player and preserve
     video.currentTime = 90;
     video.dispatchEvent(new Event("timeupdate"));
   });
-  await expect(composer.getByText("Commenting at 1:00", { exact: true })).toBeVisible();
+  await expect(composer.getByText("Comment at 1:00", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("button", { name: /Open comment by Jules at 1:00/ }),
   ).toBeDisabled();

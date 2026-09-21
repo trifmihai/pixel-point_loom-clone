@@ -37,6 +37,7 @@ describe("portal acceptance metadata", () => {
         "legacy Notion embed exposes native playback at the recommended speed without cloud feedback chrome",
         "cloud Notion embed keeps comments in a bounded player overlay with clustered timeline markers",
         "cloud Notion embed opens full review at the current or selected timestamp and shows exact saved time",
+        "Notion comment action captures a confirmed fractional timestamp with cancellable loading retry and no C shortcut",
         "compact feedback remembers guest identity and supports owned edit and delete after reload",
         "legacy Notion embed omits the cloud comment action",
         "Notion embed chrome matches a compact Notion dark-mode content block",

@@ -121,6 +121,12 @@ export function parseGumletPlayerMessage(value: unknown): GumletPlayerMessage {
     return {};
   }
 
+  // Capture replies belong exclusively to their cancellable request. In particular,
+  // getPaused must never be treated as a getMuted response or a live time update.
+  if (typeof record.listener === "string" && record.listener.startsWith("feedback-capture-")) {
+    return {};
+  }
+
   const durationSeconds = findDuration(record);
   const eventName = typeof record.event === "string" ? record.event : "";
   const payload = record.value ?? record.data ?? record.payload;
@@ -298,4 +304,80 @@ export function postGumletCommands(
     // JSON-string commands. Object-shaped commands are posted too as legacy fallback.
     target.postMessage(command, gumletPlayerOrigin);
   }
+}
+
+let timestampCaptureSequence = 0;
+
+/** Pause and capture one confirmed time; unsolicited playback events never settle this request. */
+export function captureGumletTimestamp(
+  frame: HTMLIFrameElement | null,
+  signal: AbortSignal,
+  host: Window = window,
+): Promise<number> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Timestamp capture cancelled", "AbortError"));
+  }
+  const target = frame?.contentWindow;
+  if (!target) {
+    return Promise.reject(new Error("Could not confirm timestamp"));
+  }
+  const requestId = `feedback-capture-${++timestampCaptureSequence}`;
+  const pauseId = `${requestId}-paused`;
+  const timeId = `${requestId}-time`;
+
+  return new Promise<number>((resolve, reject) => {
+    let waitingForTime = false;
+    let pollTimer: number | undefined;
+    const timeout = host.setTimeout(() => fail(new Error("Could not confirm timestamp")), 2000);
+
+    function cleanup(): void {
+      host.clearTimeout(timeout);
+      host.clearTimeout(pollTimer);
+      host.removeEventListener("message", receive);
+      signal.removeEventListener("abort", abort);
+    }
+    function fail(error: Error): void {
+      cleanup();
+      reject(error);
+    }
+    function abort(): void {
+      fail(new DOMException("Timestamp capture cancelled", "AbortError"));
+    }
+    function askPaused(): void {
+      target!.postMessage(buildPlayerJsCommand("getPaused", undefined, pauseId), gumletPlayerOrigin);
+    }
+    function receive(event: MessageEvent): void {
+      if (event.origin !== gumletPlayerOrigin || event.source !== target) {
+        return;
+      }
+      const reply = getRecord(parseMessageData(event.data));
+      if (reply?.context !== playerJsContext) {
+        return;
+      }
+      if (!waitingForTime && reply.event === "getPaused" && reply.listener === pauseId) {
+        if (reply.value === true) {
+          waitingForTime = true;
+          host.clearTimeout(pollTimer);
+          target!.postMessage(buildPlayerJsCommand("getCurrentTime", undefined, timeId), gumletPlayerOrigin);
+        } else if (reply.value === false) {
+          host.clearTimeout(pollTimer);
+          pollTimer = host.setTimeout(askPaused, 50);
+        }
+      } else if (
+        waitingForTime && reply.event === "getCurrentTime" && reply.listener === timeId &&
+        typeof reply.value === "number" && Number.isFinite(reply.value) && reply.value >= 0
+      ) {
+        cleanup();
+        resolve(reply.value);
+      }
+    }
+    host.addEventListener("message", receive);
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      target.postMessage(buildPlayerJsCommand("pause"), gumletPlayerOrigin);
+      askPaused();
+    } catch {
+      fail(new Error("Could not confirm timestamp"));
+    }
+  });
 }

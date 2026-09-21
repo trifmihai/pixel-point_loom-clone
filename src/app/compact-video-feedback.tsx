@@ -16,12 +16,14 @@ import {
   FieldLabel,
   Input,
   Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from "@/toolcraft/ui";
 
 import {
   buildFeedbackTimelineClusters,
   buildVideoReviewHref,
-  shouldHandleFeedbackShortcut,
 } from "./feedback-timeline";
 import type {
   CreatePublicFeedbackInput,
@@ -39,13 +41,13 @@ import { formatDuration } from "./portal-utils";
 
 type CompactVideoFeedbackProps = {
   children: React.ReactNode;
-  currentTimeSeconds: number;
+  currentTimeSeconds?: number;
   durationSeconds?: number;
   enabled: boolean;
   onCommentingChange?: (commenting: boolean) => void;
   onPause: () => void;
   onPlaybackRevision?: number;
-  onRequestCurrentTime: (onCaptured?: (seconds: number) => void) => void;
+  onCaptureTimestamp: (signal: AbortSignal) => Promise<number>;
   onSeek: (seconds: number) => void;
   passcode?: string;
   reviewHref: string;
@@ -53,9 +55,13 @@ type CompactVideoFeedbackProps = {
   videoId: string;
 };
 
-type DraftComment = {
-  timestampSeconds: number;
-};
+type DraftComment =
+  | { status: "capturing" | "error"; timestampSeconds?: never }
+  | { status: "ready"; timestampSeconds: number };
+
+function formatCommentTime(seconds: number): string {
+  return formatDuration(Math.floor(seconds));
+}
 
 const guestIdentityStorageKey = "pixel-point.feedback.guest.v1";
 
@@ -86,15 +92,6 @@ function saveGuestIdentity(identity: GuestFeedbackIdentity): void {
   }
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  return (
-    target instanceof Element &&
-    Boolean(
-      target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'),
-    )
-  );
-}
-
 function getReplyCount(comments: PublicFeedbackComment[], commentId: string): number {
   return comments.filter((comment) => comment.parentId === commentId).length;
 }
@@ -107,7 +104,7 @@ export function CompactVideoFeedback({
   onCommentingChange,
   onPause,
   onPlaybackRevision = 0,
-  onRequestCurrentTime,
+  onCaptureTimestamp,
   onSeek,
   passcode,
   reviewHref,
@@ -133,6 +130,7 @@ export function CompactVideoFeedback({
   const [discardOpen, setDiscardOpen] = React.useState(false);
   const [railWidth, setRailWidth] = React.useState(0);
   const [liveMessage, setLiveMessage] = React.useState("Watching");
+  const [savedCommentId, setSavedCommentId] = React.useState<string | null>(null);
   const railRef = React.useRef<HTMLDivElement | null>(null);
   const dialogRef = React.useRef<HTMLDivElement | null>(null);
   const nameRef = React.useRef<HTMLInputElement | null>(null);
@@ -141,6 +139,11 @@ export function CompactVideoFeedback({
   const pendingFocusCommentIdRef = React.useRef<string | null>(null);
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
   const composerSessionRef = React.useRef(0);
+  const captureRef = React.useRef<AbortController | null>(null);
+  const composerOpen = draft !== null;
+  const displayTime = draft?.status === "ready" ? draft.timestampSeconds : currentTimeSeconds;
+  const commentLabel = displayTime === undefined ? "Comment at this time" : `Comment at ${formatCommentTime(displayTime)}`;
+  const composerLabel = draft?.status === "ready" ? `Comment at ${formatCommentTime(draft.timestampSeconds)}` : "Add comment";
   const previousPlaybackRevisionRef = React.useRef(onPlaybackRevision);
 
   const clusters = React.useMemo(
@@ -208,14 +211,19 @@ export function CompactVideoFeedback({
 
 
   React.useEffect(() => {
-    if (!draft) {
+    if (!composerOpen) {
       return;
     }
     const timeout = window.setTimeout(() => {
       (identity.name.trim() ? bodyRef.current : nameRef.current)?.focus({ preventScroll: true });
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [draft, identity.name]);
+  }, [composerOpen]);
+
+  React.useEffect(() => () => {
+    captureRef.current?.abort();
+    composerSessionRef.current += 1;
+  }, []);
 
   React.useEffect(() => {
     const pendingId = pendingFocusCommentIdRef.current;
@@ -227,32 +235,54 @@ export function CompactVideoFeedback({
     selectedCardRef.current.focus({ preventScroll: true });
   }, [comments, draft, selectedCommentId]);
 
+  function captureTimestamp(): void {
+    captureRef.current?.abort();
+    const controller = new AbortController();
+    captureRef.current = controller;
+    const session = ++composerSessionRef.current;
+    setDraft({ status: "capturing" });
+    setLiveMessage("Getting timestamp…");
+    const timeout = window.setTimeout(() => {
+      controller.abort();
+      if (composerSessionRef.current === session) {
+        setDraft({ status: "error" });
+        setLiveMessage("Couldn’t confirm the timestamp. Try again.");
+      }
+    }, 2000);
+    controller.signal.addEventListener("abort", () => window.clearTimeout(timeout), { once: true });
+    void onCaptureTimestamp(controller.signal).then((timestampSeconds) => {
+      if (controller.signal.aborted || composerSessionRef.current !== session) return;
+      if (!Number.isFinite(timestampSeconds) || timestampSeconds < 0) {
+        throw new Error("Invalid timestamp");
+      }
+      setDraft({ status: "ready", timestampSeconds });
+      setLiveMessage(`Comment at ${formatCommentTime(timestampSeconds)}. Playback paused.`);
+    }).catch(() => {
+      if (controller.signal.aborted || composerSessionRef.current !== session) return;
+      setDraft({ status: "error" });
+      setLiveMessage("Couldn’t confirm the timestamp. Try again.");
+    }).finally(() => window.clearTimeout(timeout));
+  }
+
   function openComposer(): void {
-    if (draft) {
+    if (draft || captureRef.current) {
       (identity.name.trim() ? bodyRef.current : nameRef.current)?.focus({ preventScroll: true });
       return;
     }
 
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const session = ++composerSessionRef.current;
-    onPause();
     setSelectedCommentId(null);
-    setDraft({ timestampSeconds: Math.max(0, currentTimeSeconds) });
-    onRequestCurrentTime((timestampSeconds) => {
-      if (composerSessionRef.current !== session) {
-        return;
-      }
-      setDraft((current) =>
-        current ? { timestampSeconds: Math.max(0, timestampSeconds) } : current,
-      );
-    });
+    setEditingIdentity(!identity.name.trim());
+    setSavedCommentId(null);
     setSubmitError("");
     setMutationError("");
-    setLiveMessage(`Commenting at ${formatDuration(Math.max(0, currentTimeSeconds))}`);
+    captureTimestamp();
     onCommentingChange?.(true);
   }
 
   function closeComposer(): void {
+    captureRef.current?.abort();
+    captureRef.current = null;
     composerSessionRef.current += 1;
     setDraft(null);
     setBody("");
@@ -281,21 +311,6 @@ export function CompactVideoFeedback({
 
     function handleShortcut(event: KeyboardEvent): void {
 
-      if (
-        shouldHandleFeedbackShortcut({
-          altKey: event.altKey,
-          ctrlKey: event.ctrlKey,
-          editable: isEditableTarget(event.target),
-          key: event.key,
-          metaKey: event.metaKey,
-          repeat: event.repeat,
-        })
-      ) {
-        event.preventDefault();
-        openComposer();
-        return;
-      }
-
       if (event.key === "Escape" && draft && !deleteTarget && !discardOpen) {
         event.preventDefault();
         requestCloseComposer();
@@ -316,7 +331,7 @@ export function CompactVideoFeedback({
     setMutationError("");
     onPause();
     onSeek(comment.timestampSeconds);
-    setLiveMessage(`Comment by ${comment.authorName} at ${formatDuration(comment.timestampSeconds)}`);
+    setLiveMessage(`Comment by ${comment.authorName} at ${formatCommentTime(comment.timestampSeconds)}`);
   }
 
   function moveWithinCluster(direction: -1 | 1): void {
@@ -331,7 +346,7 @@ export function CompactVideoFeedback({
 
   async function submitComment(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!draft) {
+    if (draft?.status !== "ready" || submitting) {
       return;
     }
 
@@ -356,9 +371,12 @@ export function CompactVideoFeedback({
       pendingFocusCommentIdRef.current = created.comment.id;
       setComments((current) => [...current, created.comment]);
       setSelectedCommentId(created.comment.id);
+      setSavedCommentId(created.comment.id);
       const nextIdentity = { email: identity.email.trim(), name: identity.name.trim() };
       saveGuestIdentity(nextIdentity);
       setIdentity(nextIdentity);
+      captureRef.current?.abort();
+      captureRef.current = null;
       composerSessionRef.current += 1;
       setDraft(null);
       setBody("");
@@ -366,7 +384,7 @@ export function CompactVideoFeedback({
       setEmailExpanded(false);
       onCommentingChange?.(false);
 
-      setLiveMessage(`Comment saved at ${formatDuration(created.comment.timestampSeconds)}`);
+      setLiveMessage(`Comment added at ${formatCommentTime(created.comment.timestampSeconds)}`);
     } catch (error) {
       setSubmitError(
         error instanceof PortalApiError
@@ -477,7 +495,6 @@ export function CompactVideoFeedback({
 
   return (
     <section
-      aria-keyshortcuts="C"
       aria-label="Video feedback review"
       className="compact-feedback"
     >
@@ -491,19 +508,22 @@ export function CompactVideoFeedback({
         {children}
 
         <div className="compact-feedback__status" aria-hidden="true">
-          {draft ? `Commenting at ${formatDuration(draft.timestampSeconds)}` : "Watching"}
+          {draft ? (draft.status === "capturing" ? "Getting timestamp…" : draft.status === "error" ? "Timestamp unavailable" : composerLabel) : "Watching"}
         </div>
-        <Button
-          aria-label="Comment at current time"
-          className="compact-feedback__comment-button"
-          onClick={openComposer}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          <MessageSquarePlus />
-          Comment <kbd>C</kbd>
-        </Button>
+        <div className="compact-feedback__comment-action">
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button className="compact-feedback__comment-button" size="sm" type="button" variant="secondary" />}
+              onClick={openComposer}
+            >
+              <MessageSquarePlus aria-hidden="true" />
+              <span>{commentLabel}</span>
+            </TooltipTrigger>
+            <TooltipContent role="tooltip" side="bottom" align="end">
+              Pauses the video and adds a comment at this moment.
+            </TooltipContent>
+          </Tooltip>
+        </div>
 
         {railVisible ? (
           <div
@@ -518,8 +538,8 @@ export function CompactVideoFeedback({
               const active = cluster.items.some((item) => item.comment.id === selectedCommentId);
               const label =
                 cluster.items.length === 1
-                  ? `Open comment by ${first.authorName} at ${formatDuration(first.timestampSeconds)}: ${first.body}`
-                  : `Open ${cluster.items.length} comments around ${formatDuration(first.timestampSeconds)}`;
+                  ? `Open comment by ${first.authorName} at ${formatCommentTime(first.timestampSeconds)}: ${first.body}`
+                  : `Open ${cluster.items.length} comments around ${formatCommentTime(first.timestampSeconds)}`;
 
               return (
                 <Button
@@ -537,7 +557,7 @@ export function CompactVideoFeedback({
                   <span className="compact-feedback__marker-label">
                     {cluster.items.length > 1
                       ? cluster.items.length
-                      : formatDuration(first.timestampSeconds)}
+                      : formatCommentTime(first.timestampSeconds)}
                   </span>
                 </Button>
               );
@@ -561,10 +581,13 @@ export function CompactVideoFeedback({
             ref={selectedCardRef}
             tabIndex={-1}
           >
+            {savedCommentId === selectedComment.id ? (
+              <p className="mb-2 text-xs text-sky-200">Comment added at {formatCommentTime(selectedComment.timestampSeconds)}</p>
+            ) : null}
             <div className="compact-feedback__card-header">
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-white">{selectedComment.authorName}</p>
-                <p className="text-xs text-sky-200">{formatDuration(selectedComment.timestampSeconds)}</p>
+                <p className="text-xs text-sky-200">{formatCommentTime(selectedComment.timestampSeconds)}</p>
               </div>
               <div className="flex items-center gap-1">
                 {selectedCluster && selectedCluster.items.length > 1 ? (
@@ -612,7 +635,7 @@ export function CompactVideoFeedback({
 
         {draft ? (
           <div
-            aria-label={`Add comment at ${formatDuration(draft.timestampSeconds)}`}
+            aria-label={composerLabel}
             aria-modal="true"
             className="compact-feedback__composer"
             onKeyDown={trapDialogFocus}
@@ -621,8 +644,17 @@ export function CompactVideoFeedback({
           >
             <div className="compact-feedback__composer-header">
               <div>
-                <p className="text-sm font-semibold text-white">Commenting at {formatDuration(draft.timestampSeconds)}</p>
-                <p className="text-xs text-white/55">Playback is paused.</p>
+                <p className="text-sm font-semibold text-white">
+                  {draft.status === "capturing" ? "Getting timestamp…" : composerLabel}
+                </p>
+                {draft.status === "ready" ? (
+                  <p className="text-xs text-white/70">Playback paused. Your comment will be attached to this timestamp.</p>
+                ) : draft.status === "error" ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-red-200" role="alert">Couldn’t confirm the timestamp. Try again.</p>
+                    <Button onClick={captureTimestamp} size="sm" type="button" variant="outline">Retry timestamp</Button>
+                  </div>
+                ) : null}
               </div>
               <Button aria-label="Cancel comment" onClick={requestCloseComposer} size="icon-sm" type="button" variant="ghost"><X /></Button>
             </div>
@@ -652,9 +684,9 @@ export function CompactVideoFeedback({
               </Field>
               {submitError ? <p className="text-xs text-red-300" role="alert">{submitError}</p> : null}
               <div className="compact-feedback__composer-actions">
-                <a className="compact-feedback__review-link" href={buildVideoReviewHref(reviewHref, draft.timestampSeconds)} rel="noreferrer" target="_blank">Open full review</a>
+                <a className="compact-feedback__review-link" href={draft.status === "ready" ? buildVideoReviewHref(reviewHref, draft.timestampSeconds) : reviewHref} rel="noreferrer" target="_blank">Open full review</a>
                 <Button onClick={requestCloseComposer} size="sm" type="button" variant="outline">Cancel</Button>
-                <Button disabled={submitting} size="sm" type="submit">{submitting ? "Saving…" : "Add comment"}</Button>
+                <Button disabled={submitting || draft.status !== "ready"} size="sm" type="submit">{submitting ? "Saving…" : "Add comment"}</Button>
               </div>
             </form>
           </div>

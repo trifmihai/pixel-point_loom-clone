@@ -4,7 +4,7 @@ export const appProductReadiness = {
   productSummary:
     "A focused video-sharing workspace for organizing Gumlet videos into stable client review links.",
   requestedBehavior:
-    "Create and manage projects, add Gumlet asset IDs or links, reuse stable project and video share links, provide fixed-height Notion embeds with an in-player timestamp rail and bounded comment overlay, let C pause and open D1-persisted timestamped visual feedback on embeds and full review pages, preserve optional full-page spatial pins, let the creating browser edit or soft-delete its guest comments without exposing ownership secrets, and notify the admin in-app after the first external playback of each cloud-shared video without changing public URL contracts.",
+    "Create and manage projects, add Gumlet asset IDs or links, reuse stable project and video share links, provide fixed-height Notion embeds with an in-player timestamp rail and bounded comment overlay, let C pause and open D1-persisted timestamped visual feedback on full review pages and show a visible timestamped comment action with confirmed pause/time capture in Notion embeds, preserve optional full-page spatial pins, let the creating browser edit or soft-delete its guest comments without exposing ownership secrets, and notify the admin in-app after the first external playback of each cloud-shared video without changing public URL contracts.",
 } as const;
 
 export const appAcceptance = [
@@ -31,6 +31,7 @@ export const appAcceptance = [
   "legacy Notion embed exposes native playback at the recommended speed without cloud feedback chrome",
   "cloud Notion embed keeps comments in a bounded player overlay with clustered timeline markers",
   "cloud Notion embed opens full review at the current or selected timestamp and shows exact saved time",
+  "Notion comment action captures a confirmed fractional timestamp with cancellable loading retry and no C shortcut",
   "compact feedback remembers guest identity and supports owned edit and delete after reload",
   "legacy Notion embed omits the cloud comment action",
   "Notion embed chrome matches a compact Notion dark-mode content block",

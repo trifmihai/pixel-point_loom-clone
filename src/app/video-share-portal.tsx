@@ -216,6 +216,7 @@ export function VideoSharePortal({
   const [reviewTimestampSeconds, setReviewTimestampSeconds] = React.useState(
     initialTimestampSeconds ?? snapshot?.video.startTimeSeconds ?? 0,
   );
+  const [hasPlaybackTimestamp, setHasPlaybackTimestamp] = React.useState(false);
   const gumletPlayerRef = React.useRef<GumletPlayerHandle | null>(null);
   const gumletAttemptRef = React.useRef<GumletPlaybackAttempt>({
     active: false,
@@ -231,6 +232,10 @@ export function VideoSharePortal({
   const project = snapshot?.project ?? null;
   const isEmbed = presentation === "embed";
   const requestedStartTimeSeconds = initialTimestampSeconds ?? video?.startTimeSeconds ?? 0;
+
+  React.useEffect(() => {
+    setHasPlaybackTimestamp(false);
+  }, [slug, video?.id, video?.assetId, video?.directVideoUrl]);
 
   const recordFirstView = useFirstViewTracking({
     enabled: cloudTokenResolved,
@@ -430,6 +435,7 @@ export function VideoSharePortal({
     applyNativePlaybackSettings();
 
     setReviewTimestampSeconds(nativeVideoRef.current?.currentTime ?? 0);
+    setHasPlaybackTimestamp(true);
 
     const durationSeconds = getRoundedMetadataDuration(nativeVideoRef.current);
 
@@ -450,6 +456,55 @@ export function VideoSharePortal({
     gumletPlayerRef.current?.pause();
   }
 
+  async function handleCaptureTimestamp(signal: AbortSignal): Promise<number> {
+    signal.throwIfAborted();
+    const nativePlayer = nativeVideoRef.current;
+    if (nativePlayer) {
+      nativePlayer.pause();
+      if ((!hasPlaybackTimestamp && nativePlayer.readyState < 1) || nativePlayer.seeking) {
+        await new Promise<void>((resolve, reject) => {
+          function cleanup(): void {
+            nativePlayer!.removeEventListener("loadedmetadata", ready);
+            nativePlayer!.removeEventListener("seeked", ready);
+            nativePlayer!.removeEventListener("error", failed);
+            signal.removeEventListener("abort", aborted);
+          }
+          function ready(): void {
+            if (nativePlayer!.readyState < 1 || nativePlayer!.seeking) return;
+            cleanup();
+            resolve();
+          }
+          function failed(): void {
+            cleanup();
+            reject(new Error("Could not confirm timestamp"));
+          }
+          function aborted(): void {
+            cleanup();
+            reject(new DOMException("Timestamp capture cancelled", "AbortError"));
+          }
+          nativePlayer.addEventListener("loadedmetadata", ready);
+          nativePlayer.addEventListener("seeked", ready);
+          nativePlayer.addEventListener("error", failed);
+          signal.addEventListener("abort", aborted, { once: true });
+          if (signal.aborted) aborted();
+        });
+      }
+      signal.throwIfAborted();
+      nativePlayer.pause();
+      const seconds = nativePlayer.currentTime;
+      if (!Number.isFinite(seconds) || seconds < 0) throw new Error("Could not confirm timestamp");
+      setReviewTimestampSeconds(seconds);
+      setHasPlaybackTimestamp(true);
+      return seconds;
+    }
+    if (!gumletPlayerRef.current) throw new Error("Could not confirm timestamp");
+    const seconds = await gumletPlayerRef.current.captureTimestamp(signal);
+    signal.throwIfAborted();
+    setReviewTimestampSeconds(seconds);
+    setHasPlaybackTimestamp(true);
+    return seconds;
+  }
+
   function handleReviewRequestCurrentTime(
     onCaptured?: (seconds: number) => void,
   ): void {
@@ -468,6 +523,7 @@ export function VideoSharePortal({
 
   function handleGumletCurrentTime(currentTimeSeconds: number): void {
     setReviewTimestampSeconds(currentTimeSeconds);
+    setHasPlaybackTimestamp(true);
     const onCaptured = reviewTimeCaptureRef.current;
     reviewTimeCaptureRef.current = null;
     onCaptured?.(currentTimeSeconds);
@@ -693,7 +749,10 @@ export function VideoSharePortal({
         recordFirstView();
         setPlaybackRevision((current) => current + 1);
       }}
-      onTimeUpdate={(event) => setReviewTimestampSeconds(event.currentTarget.currentTime)}
+      onTimeUpdate={(event) => {
+        setReviewTimestampSeconds(event.currentTarget.currentTime);
+        setHasPlaybackTimestamp(true);
+      }}
       poster={video.thumbnailUrl}
       playsInline
       preload="metadata"
@@ -726,7 +785,8 @@ export function VideoSharePortal({
 
           <div className="notion-video-embed__player-slot">
             <CompactVideoFeedback
-              currentTimeSeconds={reviewTimestampSeconds}
+              key={`${slug}:${video.id}:${video.assetId}:${video.directVideoUrl ?? ""}`}
+              currentTimeSeconds={hasPlaybackTimestamp ? reviewTimestampSeconds : undefined}
               durationSeconds={effectiveDurationSeconds}
               enabled={cloudTokenResolved}
               onCommentingChange={(commenting) => {
@@ -736,7 +796,7 @@ export function VideoSharePortal({
               }}
               onPause={handleReviewPause}
               onPlaybackRevision={playbackRevision}
-              onRequestCurrentTime={handleReviewRequestCurrentTime}
+              onCaptureTimestamp={handleCaptureTimestamp}
               onSeek={handleReviewSeek}
               passcode={feedbackPasscode}
               reviewHref={reviewHref}

@@ -4,6 +4,7 @@ import { LoaderCircle, WifiOff } from "lucide-react";
 import type { PortalVideo } from "./portal-types";
 import { buildGumletEmbedUrl } from "./portal-utils";
 import {
+  captureGumletTimestamp,
   buildGumletDurationCommands,
   buildGumletCurrentTimeCommands,
   buildGumletPauseCommands,
@@ -34,6 +35,7 @@ const gumletPlayerLoadingTimeoutMs = 6500;
 
 export type GumletPlayerHandle = {
   applyRecommendedSpeed: () => void;
+  captureTimestamp: (signal: AbortSignal) => Promise<number>;
   pause: () => void;
   requestCurrentTime: () => void;
   requestDuration: () => void;
@@ -58,6 +60,7 @@ export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerPro
   ): React.JSX.Element {
     const frameRef = React.useRef<HTMLIFrameElement | null>(null);
     const readyRef = React.useRef(false);
+    const capturesRef = React.useRef(new Set<AbortController>());
     const [playerState, setPlayerState] = React.useState<GumletPlayerState>("loading");
     const onDurationRef = useLatestValue(onDuration);
     const onCurrentTimeRef = useLatestValue(onCurrentTime);
@@ -96,6 +99,25 @@ export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerPro
     postGumletCommands(frameRef.current, buildGumletPauseCommands());
   }, []);
 
+  const captureTimestamp = React.useCallback(async (signal: AbortSignal): Promise<number> => {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) controller.abort();
+    capturesRef.current.add(controller);
+    try {
+      return await captureGumletTimestamp(frameRef.current, controller.signal);
+    } finally {
+      capturesRef.current.delete(controller);
+      signal.removeEventListener("abort", abort);
+    }
+  }, []);
+
+  React.useEffect(() => () => {
+    for (const controller of capturesRef.current) controller.abort();
+    capturesRef.current.clear();
+  }, [embedUrl]);
+
   const seekTo = React.useCallback((seconds: number) => {
     postGumletCommands(frameRef.current, buildGumletSeekCommands(seconds));
   }, []);
@@ -116,13 +138,14 @@ export const GumletPlayer = React.forwardRef<GumletPlayerHandle, GumletPlayerPro
     ref,
     () => ({
       applyRecommendedSpeed,
+      captureTimestamp,
       pause,
       requestCurrentTime,
       requestDuration,
       seekTo,
       startReview,
     }),
-    [applyRecommendedSpeed, pause, requestCurrentTime, requestDuration, seekTo, startReview],
+    [applyRecommendedSpeed, captureTimestamp, pause, requestCurrentTime, requestDuration, seekTo, startReview],
   );
 
   React.useEffect(() => {
